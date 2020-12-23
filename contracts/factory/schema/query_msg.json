@@ -1,0 +1,19 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "QueryMsg",
+  "description": "Queries",
+  "anyOf": [
+    {
+      "description": "Displays the auction information",
+      "type": "object",
+      "required": [
+        "auction_info"
+      ],
+      "properties": {
+        "auction_info": {
+          "type": "object"
+        }
+      }
+    }
+  ]
+}
