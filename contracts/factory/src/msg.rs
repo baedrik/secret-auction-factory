@@ -82,6 +82,7 @@ pub enum HandleMsg {
     /// Set a viewing key to be used with all factory and auction authenticated queries
     SetViewingKey {
         key: String,
+        // optional padding can be used so message length doesn't betray key length
         padding: Option<String>,
     },
 
@@ -95,12 +96,28 @@ pub enum HandleMsg {
 pub enum QueryMsg {
     /// lists all auctions the given address has owned, won, or have an active bid
     ListMyAuctions { 
+        // address whose activity to display
         address: HumanAddr,
         /// viewing key
         viewing_key: String,
         /// optional filter for only active or closed auctions.  If not specified, lists all
         #[serde(default)]
         filter: Option<FilterTypes> },
+    /// lists all active auctions sorted by pair
+    ListActiveAuctions {},
+    /// lists closed auctions in reverse chronological order.  If you specify page size, it return
+    /// only that number of auctions (default is 200).  If you specify the before timestamp, it will
+    /// start listing from the first auction that closed before the timestamp (in number of seconds
+    /// since epoch 01/01/1970).  If you are paginating, you would take the timestamp of the last
+    /// auction you receive, and specify that as the before timestamp on your next query so it will
+    /// continue where it left off
+    ListClosedAuctions {
+        /// optionally only show auctions that closed before this timestamp (number of seconds from
+        /// epoch 01/01/1970)
+        before: Option<u64>,
+        /// optional number of auctions to return
+        page_size: Option<u32>,
+    },
 }
 
 /// the filter types when viewing an address' auction
@@ -116,7 +133,7 @@ pub enum FilterTypes {
 #[derive(Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum QueryAnswer {
-    /// List the auctions where I am either the seller of bidder (or won)
+    /// List the auctions where address is either the seller of bidder (or won)
     ListMyAuctions{
         /// lists of the address' active auctions
         #[serde(skip_serializing_if = "Option::is_none")]
@@ -124,6 +141,18 @@ pub enum QueryAnswer {
         /// lists of the address' closed auctions
         #[serde(skip_serializing_if = "Option::is_none")]
         closed: Option<MyClosedLists>,
+    },
+    /// List active auctions sorted by pair
+    ListActiveAuctions {
+        /// active auctions sorted by pair
+        #[serde(skip_serializing_if = "Option::is_none")]
+        active: Option<Vec<AuctionInfo>>,
+    },
+    /// List closed auctions in reverse chronological order
+    ListClosedAuctions {
+        /// closed auctions in reverse chronological order
+        #[serde(skip_serializing_if = "Option::is_none")]
+        closed: Option<Vec<ClosedAuctionInfo>>,
     },
     /// Viewing Key Error
     ViewingKeyError { error: String },
@@ -220,6 +249,7 @@ pub struct StoreAuctionInfo {
 }
 
 impl StoreAuctionInfo {
+    /// takes the active auction information and creates a closed auction info struct
     pub fn to_store_closed_auction_info(
         &self,
         winning_bid: Option<u128>,

@@ -880,8 +880,28 @@ fn filter_only_active<S: Storage>(
 pub fn query<S: Storage, A: Api, Q: Querier>(deps: &Extern<S, A, Q>, msg: QueryMsg) -> QueryResult {
         let response = match msg {
             QueryMsg::ListMyAuctions { address, viewing_key, filter } => try_list_my(deps, &address, viewing_key, filter),
+            QueryMsg::ListActiveAuctions { } => try_list_active(deps),
+            QueryMsg::ListClosedAuctions { before, page_size } => try_list_closed(deps, before, page_size),
         };
         pad_query_result(response, BLOCK_SIZE)
+}
+
+fn try_list_closed<S: Storage, A: Api, Q: Querier>(
+    deps: &Extern<S, A, Q>,
+    before: Option<u64>,
+    page_size: Option<u32>,
+) -> QueryResult {
+    to_binary(&QueryAnswer::ListClosedAuctions{
+        closed: display_closed(&deps.api, &deps.storage, before, page_size)?,
+    })
+}
+
+fn try_list_active<S: Storage, A: Api, Q: Querier>(
+    deps: &Extern<S, A, Q>,
+) -> QueryResult {
+    to_binary(&QueryAnswer::ListActiveAuctions{
+        active: display_active_list(&deps.api, &deps.storage, None, ACTIVE_KEY)?,
+    })
 }
 
 fn try_list_my<S: Storage, A: Api, Q: Querier>(
