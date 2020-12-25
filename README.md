@@ -1,5 +1,5 @@
 # Sealed Bid Auction Factory
-This is an update to the [sealed-bid auction](https://github.com/baedrik/SCRT-sealed-bid-auction) secret contract running on Secret Network.  The new implementation incorporates the use of a factory contract to allow someone to view only the active auctions or only the closed auctions.  They may also view only the auctions that they have created, the auctions in which they have active bids, and the auctions they have won if they have created a viewing key with the factory contract.  If they have created a viewing key, the factory will automatically set the viewing key with every active auction they have bids with in order for the bidder to view their bid information directly from the auction.
+This is an update to the [sealed-bid auction](https://github.com/baedrik/SCRT-sealed-bid-auction) secret contract running on Secret Network.  The new implementation incorporates the use of a factory contract to allow someone to view only the active auctions or only the closed auctions.  They may also view only the auctions that they have created, the auctions in which they have active bids, and the auctions they have won if they have created a viewing key with the factory contract.  If they have created a viewing key, the factory will automatically set the viewing key with every active auction they have bids with to allow the bidder to view their bid information directly from the auction.
 
 Although the original auction contract will no longer be updated, the repo will remain available so that people may use it as an example for writing secret contracts.  The original repo includes an in depth [WALKTHROUGH](https://github.com/baedrik/SCRT-sealed-bid-auction/blob/master/WALKTHROUGH.md) as well as an explanation of [CALLING_OTHER_CONTRACTS](https://github.com/baedrik/SCRT-sealed-bid-auction/blob/master/CALLING_OTHER_CONTRACTS.md).
 
@@ -80,7 +80,7 @@ You may view the list of closed auctions in reverse chronological order with
 ```sh
 secretcli q compute query *factory_contract_address* '{"list_closed_auctions":{"before":*optional_u64_timestamp*,"page_size":*optional_u32_number_to_list*}}'
 ```
-If you do not supply the `before` field, it will start with the most recent closed auction, otherwise it will only display auctions that had closed before the provided timestamp.  The timestamp is in the number of seconds since epoch time (01/01/1970).  If you do not supply the `page_size` field, it will default to listing 200 closed auctions, otherwise it will display up to the number specifed as `page_size`.
+If you do not supply the `before` field, it will start with the most recently closed auction, otherwise it will only display auctions that had closed before the provided timestamp.  The timestamp is in the number of seconds since epoch time (01/01/1970).  If you do not supply the `page_size` field, it will default to listing up to 200 closed auctions, otherwise it will display up to the number specifed as `page_size`.
 
 If you are paginating your list, you would take the timestamp of the last auction returned, and specify that in the `before` field of the next query in order to have the subsequent query start where the last one left off.
 
@@ -105,9 +105,9 @@ You may view your current active bid amount and the time the bid was placed with
 ```sh
 secretcli q compute query *auction_contract_address* '{"view_bid": {"address":"*address_whose_bid_to_list*","viewing_key":"*viewing_key*"}}'
 ```
-You will need to have created a viewing key with the factory contract before you can view an active bid in an auction.
+You must have created a viewing key with the factory contract before you can view an active bid in an auction.
 
 ## Notes for UI builders
 It is recommended that the UI designed to send a bid use the optional "padding" field when calling the bid token contract's Send function.  You will want the number of digits of the send amount + the number of characters in the padding field to be a constant number (I use 40 characters, because the maximum number of digits of Uint128 is 39, and I always want at least one blank in padding).  That way the size of the Send does not leak information about the size of the bid.
 
-Also, you should be aware that responses from bidding and consigning (functions that are called indirectly when doing a Send tx with a token contract) are sent in the log attributes.  This is because when one contract calls another contract, only logs (not the data field) are forwarded back to the user.  On the other hand, any time you call the auction contract directly, the response will be sent in the data field, which is the preferred method of returning json responses.
+Also, you should be aware that responses from bidding and consigning (functions that are called indirectly when doing a Send tx with a token contract) are sent in the log attributes.  Also, the address of a newly created auction is returned in a log attribute.  This is because when one contract calls another contract, only logs (not the data field) are forwarded back to the user.  On the other hand, any time you call a contract directly that does not need to call another contract (or that can ignore the other contract's response), the response will be sent in the data field, which is the preferred method of returning json responses.
