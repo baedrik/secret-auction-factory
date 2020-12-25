@@ -31,7 +31,7 @@ pub const PREFIX_VIEW_KEY: &[u8] = b"viewingkey";
 /// response size
 pub const BLOCK_SIZE: usize = 256;
 
-/// auction info
+/// auction info needed by factory
 #[derive(Serialize)]
 pub struct FactoryAuctionInfo {
     /// auction label
@@ -44,14 +44,18 @@ pub struct FactoryAuctionInfo {
     pub version: u8,
 }
 
+/// the factory's handle messages this auction will call
 #[derive(Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum FactoryHandleMsg {
     /// RegisterAuction saves the auction info of a newly instantiated auction
     RegisterAuction {
+        /// address of the seller
         seller: HumanAddr,
+        /// this auction's info
         auction: FactoryAuctionInfo,
     },
+    /// registers the closure of this auction with the factory
     CloseAuction {
         /// auction seller
         seller: HumanAddr,
@@ -60,13 +64,10 @@ pub enum FactoryHandleMsg {
         /// winning bid if the auction ended in a swap
         winning_bid: Option<Uint128>,
     },
-
-    RegisterBidder {
-        bidder: HumanAddr,
-    },
-    RemoveBidder {
-        bidder: HumanAddr,
-    },
+    /// registers a new bidder with the factory
+    RegisterBidder { bidder: HumanAddr },
+    /// tells factory the address is no longer a bidder in this auction
+    RemoveBidder { bidder: HumanAddr },
 }
 
 impl HandleCallback for FactoryHandleMsg {
@@ -129,7 +130,7 @@ pub fn init<S: Storage, A: Api, Q: Querier>(
     // perform factory register callback
     let cosmos_msg =
         reg_auction_msg.to_cosmos_msg(msg.factory.code_hash, msg.factory.address, None)?;
-    // register receive with the bid/sell token contracts
+    // and register receive with the bid/sell token contracts
     Ok(InitResponse {
         messages: vec![
             state
@@ -167,6 +168,16 @@ pub fn handle<S: Storage, A: Api, Q: Querier>(
     pad_handle_result(response, BLOCK_SIZE)
 }
 
+/// Returns HandleResult
+///
+/// called by the factory to set the viewing key for this bidder
+///
+/// # Arguments
+///
+/// * `deps` - mutable reference to Extern containing all the contract's external dependencies
+/// * `env` - Env of contract's environment
+/// * `bidder` - a reference to the address of the bidder whose key should be set
+/// * `key` - string to be used as the viewing key
 fn try_set_key<S: Storage, A: Api, Q: Querier>(
     deps: &mut Extern<S, A, Q>,
     env: Env,
@@ -188,9 +199,7 @@ fn try_set_key<S: Storage, A: Api, Q: Querier>(
 
     Ok(HandleResponse {
         messages: vec![],
-
-        //////////////
-        log: vec![log("vkey", format!("{}", vk))],
+        log: vec![],
         data: None,
     })
 }
@@ -246,6 +255,7 @@ fn try_receive<S: Storage, A: Api, Q: Querier>(
 /// * `deps` - mutable reference to Extern containing all the contract's external dependencies
 /// * `owner` - address of owner of tokens sent to escrow
 /// * `amount` - Uint128 amount sent to escrow
+/// * `state` - mutable reference to the state of the auction
 fn try_consign<S: Storage, A: Api, Q: Querier>(
     deps: &mut Extern<S, A, Q>,
     owner: HumanAddr,
@@ -602,8 +612,6 @@ fn try_finalize<S: Storage, A: Api, Q: Querier>(
     only_if_bids: bool,
     return_all: bool,
 ) -> HandleResult {
-    let mut tmplog = Vec::new();
-
     let mut state: State = load(&deps.storage, CONFIG_KEY)?;
 
     // can only do a return_all if the auction is closed
@@ -701,7 +709,6 @@ fn try_finalize<S: Storage, A: Api, Q: Querier>(
                 state
                     .bidders
                     .remove(&winning_bid.bidder.as_slice().to_vec());
-                tmplog.push(log("here", "winner processing"));
             }
         }
         // loops through all remaining bids to return them to the bidders
@@ -731,9 +738,9 @@ fn try_finalize<S: Storage, A: Api, Q: Querier>(
     }
     // mark that auction had ended
     if !state.is_completed {
-        tmplog.push(log("here", "it completed"));
         state.is_completed = true;
         update_state = true;
+        // let factory know
         let close_msg = FactoryHandleMsg::CloseAuction {
             seller: state.seller.clone(),
             bidder: winner,
@@ -745,7 +752,6 @@ fn try_finalize<S: Storage, A: Api, Q: Querier>(
             None,
         )?;
         cos_msg.push(close_msg);
-        tmplog.push(log("cosmsgs", format!("{:?}", cos_msg)));
     }
     if update_state {
         save(&mut deps.storage, CONFIG_KEY, &state)?;
@@ -772,7 +778,7 @@ fn try_finalize<S: Storage, A: Api, Q: Querier>(
     };
     Ok(HandleResponse {
         messages: cos_msg,
-        log: tmplog,
+        log: vec![],
         data: Some(to_binary(&HandleAnswer::CloseAuction {
             status: Success,
             message: log_msg,

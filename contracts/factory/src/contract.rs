@@ -948,12 +948,11 @@ fn filter_only_active<S: ReadonlyStorage>(
         let my_active: HashSet<Vec<u8>> =
             my_auctions.iter().filter_map(|v| active.take(v)).collect();
         *updated = start_len != my_active.len();
-        Ok(my_active)
-    // if not just return an empty list
-    } else {
-        *updated = false;
-        Ok(HashSet::new())
+        return Ok(my_active);
+        // if not just return an empty list
     }
+    *updated = false;
+    Ok(HashSet::new())
 }
 
 /////////////////////////////////////// Query /////////////////////////////////////
@@ -1082,15 +1081,14 @@ fn try_list_my<S: Storage, A: Api, Q: Querier>(
             }
         }
 
-        to_binary(&QueryAnswer::ListMyAuctions {
+        return to_binary(&QueryAnswer::ListMyAuctions {
             active: active_lists,
             closed: closed_lists,
-        })
-    } else {
-        to_binary(&QueryAnswer::ViewingKeyError {
-            error: "Wrong viewing key for this address or viewing key not set".to_string(),
-        })
+        });
     }
+    to_binary(&QueryAnswer::ViewingKeyError {
+        error: "Wrong viewing key for this address or viewing key not set".to_string(),
+    })
 }
 
 /// Returns StdResult<Option<Vec<AuctionInfo>>>
@@ -1163,13 +1161,12 @@ fn display_active_list<S: ReadonlyStorage, A: Api>(
         }
         None => Vec::new(),
     };
+    if actives.is_empty() {
+        return Ok(None);
+    }
     // sort it by pair
     actives.sort_by(|a, b| a.pair.cmp(&b.pair));
-    if actives.is_empty() {
-        Ok(None)
-    } else {
-        Ok(Some(actives))
-    }
+    Ok(Some(actives))
 }
 
 /// Returns StdResult<Option<Vec<ClosedAuctionInfo>>>
@@ -1224,10 +1221,9 @@ fn display_addr_closed<S: ReadonlyStorage, A: Api>(
         None => Vec::new(),
     };
     if closed.is_empty() {
-        Ok(None)
-    } else {
-        Ok(Some(closed))
+        return Ok(None);
     }
+    Ok(Some(closed))
 }
 
 /// Returns StdResult<Option<Vec<ClosedAuctionInfo>>>
@@ -1287,8 +1283,7 @@ fn display_closed<S: ReadonlyStorage, A: Api>(
         None => Vec::new(),
     };
     if closed.is_empty() {
-        Ok(None)
-    } else {
-        Ok(Some(closed))
+        return Ok(None);
     }
+    Ok(Some(closed))
 }

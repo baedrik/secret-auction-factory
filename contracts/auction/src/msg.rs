@@ -76,7 +76,7 @@ pub enum HandleMsg {
     ///  SetViewingkey can only be called by the factory contract to ensure all auctions use the
     ///  same viewing key for one user
     SetViewingKey {
-        /// set key for this addres
+        /// set key for this address
         bidder: HumanAddr,
         /// viewing key
         key: String,
