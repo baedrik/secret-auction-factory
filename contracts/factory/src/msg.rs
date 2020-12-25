@@ -95,14 +95,15 @@ pub enum HandleMsg {
 #[serde(rename_all = "snake_case")]
 pub enum QueryMsg {
     /// lists all auctions the given address has owned, won, or have an active bid
-    ListMyAuctions { 
+    ListMyAuctions {
         // address whose activity to display
         address: HumanAddr,
         /// viewing key
         viewing_key: String,
         /// optional filter for only active or closed auctions.  If not specified, lists all
         #[serde(default)]
-        filter: Option<FilterTypes> },
+        filter: Option<FilterTypes>,
+    },
     /// lists all active auctions sorted by pair
     ListActiveAuctions {},
     /// lists closed auctions in reverse chronological order.  If you specify page size, it return
@@ -114,13 +115,15 @@ pub enum QueryMsg {
     ListClosedAuctions {
         /// optionally only show auctions that closed before this timestamp (number of seconds from
         /// epoch 01/01/1970)
+        #[serde(default)]
         before: Option<u64>,
         /// optional number of auctions to return
+        #[serde(default)]
         page_size: Option<u32>,
     },
 }
 
-/// the filter types when viewing an address' auction
+/// the filter types when viewing an address' auctions
 #[derive(Serialize, Deserialize, JsonSchema, PartialEq)]
 #[serde(rename_all = "snake_case")]
 pub enum FilterTypes {
@@ -134,7 +137,7 @@ pub enum FilterTypes {
 #[serde(rename_all = "snake_case")]
 pub enum QueryAnswer {
     /// List the auctions where address is either the seller of bidder (or won)
-    ListMyAuctions{
+    ListMyAuctions {
         /// lists of the address' active auctions
         #[serde(skip_serializing_if = "Option::is_none")]
         active: Option<MyActiveLists>,
@@ -160,7 +163,7 @@ pub enum QueryAnswer {
 
 /// Lists of active auctions sorted by pair where the address is a seller or bidder
 #[derive(Serialize, Deserialize, JsonSchema)]
-#[serde(rename_all = "snake_case")] 
+#[serde(rename_all = "snake_case")]
 pub struct MyActiveLists {
     /// active auctions sorted by pair where the address is the seller
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -170,10 +173,10 @@ pub struct MyActiveLists {
     pub as_bidder: Option<Vec<AuctionInfo>>,
 }
 
-/// Lists of closed auctions in reverse chronological order where the address is a 
+/// Lists of closed auctions in reverse chronological order where the address is a
 /// seller or won
 #[derive(Serialize, Deserialize, JsonSchema)]
-#[serde(rename_all = "snake_case")] 
+#[serde(rename_all = "snake_case")]
 pub struct MyClosedLists {
     /// closed auctions in reverse chronological order where the address is the seller
     #[serde(skip_serializing_if = "Option::is_none")]

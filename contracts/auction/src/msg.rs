@@ -90,7 +90,10 @@ pub enum QueryMsg {
     /// Displays the auction information
     AuctionInfo {},
     /// View active bid for input address
-    ViewBid { address: HumanAddr, viewing_key: String },
+    ViewBid {
+        address: HumanAddr,
+        viewing_key: String,
+    },
 }
 
 /// responses to queries

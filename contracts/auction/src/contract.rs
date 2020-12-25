@@ -602,9 +602,7 @@ fn try_finalize<S: Storage, A: Api, Q: Querier>(
     only_if_bids: bool,
     return_all: bool,
 ) -> HandleResult {
-
-let mut tmplog = Vec::new();
-
+    let mut tmplog = Vec::new();
 
     let mut state: State = load(&deps.storage, CONFIG_KEY)?;
 
@@ -703,8 +701,7 @@ let mut tmplog = Vec::new();
                 state
                     .bidders
                     .remove(&winning_bid.bidder.as_slice().to_vec());
-tmplog.push(log("here", "winner processing"));
-
+                tmplog.push(log("here", "winner processing"));
             }
         }
         // loops through all remaining bids to return them to the bidders
@@ -734,7 +731,7 @@ tmplog.push(log("here", "winner processing"));
     }
     // mark that auction had ended
     if !state.is_completed {
-tmplog.push(log("here", "it completed"));
+        tmplog.push(log("here", "it completed"));
         state.is_completed = true;
         update_state = true;
         let close_msg = FactoryHandleMsg::CloseAuction {
@@ -748,7 +745,7 @@ tmplog.push(log("here", "it completed"));
             None,
         )?;
         cos_msg.push(close_msg);
-tmplog.push(log("cosmsgs",format!("{:?}",cos_msg)));
+        tmplog.push(log("cosmsgs", format!("{:?}", cos_msg)));
     }
     if update_state {
         save(&mut deps.storage, CONFIG_KEY, &state)?;
@@ -795,7 +792,10 @@ tmplog.push(log("cosmsgs",format!("{:?}",cos_msg)));
 pub fn query<S: Storage, A: Api, Q: Querier>(deps: &Extern<S, A, Q>, msg: QueryMsg) -> QueryResult {
     let response = match msg {
         QueryMsg::AuctionInfo { .. } => try_query_info(deps),
-        QueryMsg::ViewBid { address, viewing_key } => try_view_bid(deps, &address, viewing_key),
+        QueryMsg::ViewBid {
+            address,
+            viewing_key,
+        } => try_view_bid(deps, &address, viewing_key),
     };
     pad_query_result(response, BLOCK_SIZE)
 }

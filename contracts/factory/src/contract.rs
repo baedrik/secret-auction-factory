@@ -2,8 +2,8 @@ use serde::Serialize;
 
 use cosmwasm_std::{
     log, to_binary, Api, Binary, CanonicalAddr, Env, Extern, HandleResponse, HandleResult,
-    HumanAddr, InitResponse, InitResult, Querier, QueryResult, ReadonlyStorage,
-    StdError, StdResult, Storage, Uint128,
+    HumanAddr, InitResponse, InitResult, Querier, QueryResult, ReadonlyStorage, StdError,
+    StdResult, Storage, Uint128,
 };
 
 use cosmwasm_storage::{PrefixedStorage, ReadonlyPrefixedStorage};
@@ -16,10 +16,9 @@ use secret_toolkit::{
 };
 
 use crate::msg::{
-    AuctionContractInfo, AuctionInfo, ContractInfo, HandleAnswer, HandleMsg, InitMsg, QueryAnswer,
-    QueryMsg, FilterTypes, ClosedAuctionInfo, MyActiveLists, MyClosedLists,
-    ResponseStatus::Success,
-    StoreAuctionInfo, StoreClosedAuctionInfo,
+    AuctionContractInfo, AuctionInfo, ClosedAuctionInfo, ContractInfo, FilterTypes, HandleAnswer,
+    HandleMsg, InitMsg, MyActiveLists, MyClosedLists, QueryAnswer, QueryMsg,
+    ResponseStatus::Success, StoreAuctionInfo, StoreClosedAuctionInfo,
 };
 use crate::rand::sha_256;
 use crate::state::{load, may_load, remove, save};
@@ -162,6 +161,20 @@ pub fn handle<S: Storage, A: Api, Q: Querier>(
     pad_handle_result(response, BLOCK_SIZE)
 }
 
+/// Returns HandleResult
+///
+/// create a new auction
+///
+/// # Arguments
+///
+/// * `deps` - mutable reference to Extern containing all the contract's external dependencies
+/// * `env` - Env of contract's environment
+/// * `label` - String containing the label to give the auction
+/// * `sell_contract` - ContractInfo containing the code hash and address of the sale token
+/// * `bid_contract` - ContractInfo containing the code hash and address of the bid token
+/// * `sell_amount` - Uint128 amount to sell in smallest denomination
+/// * `minimum_bid` - Uint128 minimum bid owner will accept
+/// * `description` - optional free-form text string owner may have used to describe the auction
 #[allow(clippy::too_many_arguments)]
 fn try_create_auction<S: Storage, A: Api, Q: Querier>(
     deps: &mut Extern<S, A, Q>,
@@ -238,7 +251,7 @@ fn try_create_auction<S: Storage, A: Api, Q: Querier>(
     let add_symbol = may_sell_index.is_none() || may_bid_index.is_none();
     let sell_index: u16;
     let bid_index: u16;
-    // if there is a new symbol
+    // if there is a new symbol add it to the list and get its index
     if add_symbol {
         let mut symbols: Vec<String> = load(&deps.storage, SYMBOLS_KEY)?;
         match may_sell_index {
@@ -259,11 +272,13 @@ fn try_create_auction<S: Storage, A: Api, Q: Querier>(
         }
         save(&mut deps.storage, SYMBOLS_KEY, &symbols)?;
         save(&mut deps.storage, SYMBOLS_MAP_KEY, &symmap)?;
+    // not a new symbol so just get its index from the map
     } else {
         sell_index = may_sell_index.unwrap();
         bid_index = may_bid_index.unwrap();
     }
 
+    // get the current version of the auction contract's hash and code id
     let mut versions: Vec<AuctionContractInfo> = load(&deps.storage, VERSION_KEY)?;
     let version = (versions.len() - 1) as u8;
     let auction_info = versions
@@ -298,6 +313,16 @@ fn try_create_auction<S: Storage, A: Api, Q: Querier>(
     })
 }
 
+/// Returns HandleResult
+///
+/// Registers the calling auction by saving its info and adding it to the appropriate lists
+///
+/// # Arguments
+///
+/// * `deps` - mutable reference to Extern containing all the contract's external dependencies
+/// * `env` - Env of contract's environment
+/// * `seller` - reference to the address of the auction's seller
+/// * `auction` - reference to StoreAuctionInfo of the auction that is trying to register
 fn try_register_auction<S: Storage, A: Api, Q: Querier>(
     deps: &mut Extern<S, A, Q>,
     env: Env,
@@ -341,6 +366,18 @@ fn try_register_auction<S: Storage, A: Api, Q: Querier>(
     })
 }
 
+/// Returns HandleResult
+///
+/// closes the calling auction by saving its info and adding/removing it to/from the
+/// appropriate lists
+///
+/// # Arguments
+///
+/// * `deps` - mutable reference to Extern containing all the contract's external dependencies
+/// * `env` - Env of contract's environment
+/// * `seller` - reference to the address of the auction's seller
+/// * `bidder` - reference to the auction's winner if it had one
+/// * `winning_bid` - auction's winning bid if it had one
 fn try_close_auction<S: Storage, A: Api, Q: Querier>(
     deps: &mut Extern<S, A, Q>,
     env: Env,
@@ -348,11 +385,6 @@ fn try_close_auction<S: Storage, A: Api, Q: Querier>(
     bidder: Option<&HumanAddr>,
     winning_bid: Option<Uint128>,
 ) -> HandleResult {
-
-
-//let mut tmplog = Vec::new();
-
-
     let auction_addr = &deps.api.canonical_address(&env.message.sender)?;
 
     // verify auction is in active list of auctions and not a spam attempt
@@ -437,16 +469,20 @@ fn try_close_auction<S: Storage, A: Api, Q: Querier>(
 
     Ok(HandleResponse {
         messages: vec![],
-        ////////
-        //        log: vec![],
-        log: vec![
-            log("auction", format!("{}", env.message.sender)),
-            log("seller", format!("{}", seller)),
-        ],
+        log: vec![],
         data: None,
     })
 }
 
+/// Returns HandleResult
+///
+/// registers a new bidder of the calling auction
+///
+/// # Arguments
+///
+/// * `deps` - mutable reference to Extern containing all the contract's external dependencies
+/// * `env` - Env of contract's environment
+/// * `bidder` - address of the new bidder
 fn try_reg_bidder<S: Storage, A: Api, Q: Querier>(
     deps: &mut Extern<S, A, Q>,
     env: Env,
@@ -483,21 +519,15 @@ fn try_reg_bidder<S: Storage, A: Api, Q: Querier>(
         if let Some(mut versions) = load_versions {
             let key: String = format!("{}", my_key);
             let read_infos = ReadonlyPrefixedStorage::new(PREFIX_ACTIVE_INFO, &deps.storage);
-            let auction: Option<StoreAuctionInfo> =
-                may_load(&read_infos, auction_addr.as_slice())?;
+            let auction: Option<StoreAuctionInfo> = may_load(&read_infos, auction_addr.as_slice())?;
             if let Some(auction_info) = auction {
                 if (auction_info.version as usize) < versions.len() {
-                    //                let set_msg = SetKeyMsg::SetViewingKey { bidder, key };
-                    let set_msg = SetKeyMsg::SetViewingKey {
-                        bidder: bidder.clone(),
-                        key,
-                    };
-
+                    // set the viewing key with the auction
+                    let set_msg = SetKeyMsg::SetViewingKey { bidder, key };
                     let contract_info = versions.swap_remove(auction_info.version as usize);
                     cosmos_msg.push(set_msg.to_cosmos_msg(
                         contract_info.code_hash,
-                        //                        env.message.sender,
-                        env.message.sender.clone(),
+                        env.message.sender,
                         None,
                     )?);
                 } else {
@@ -543,16 +573,20 @@ fn try_reg_bidder<S: Storage, A: Api, Q: Querier>(
 
     Ok(HandleResponse {
         messages: cosmos_msg,
-        ////////
-        //        log: vec![],
-        log: vec![
-            log("auction", format!("{}", env.message.sender)),
-            log("bidder", format!("{}", bidder)),
-        ],
+        log: vec![],
         data: None,
     })
 }
 
+/// Returns HandleResult
+///
+/// removes registration of the retracting bidder of the calling auction
+///
+/// # Arguments
+///
+/// * `deps` - mutable reference to Extern containing all the contract's external dependencies
+/// * `env` - Env of contract's environment
+/// * `bidder` - reference to the address of the retracting bidder
 fn try_remove_bidder<S: Storage, A: Api, Q: Querier>(
     deps: &mut Extern<S, A, Q>,
     env: Env,
@@ -579,23 +613,30 @@ fn try_remove_bidder<S: Storage, A: Api, Q: Querier>(
     save(&mut bidder_store, bidder_raw.as_slice(), &my_active)?;
 
     Ok(HandleResponse {
-        /////////
         messages: vec![],
-        log: vec![
-            log("auction", format!("{}", env.message.sender)),
-            log("bidder", format!("{}", bidder)),
-        ],
-        //        log: vec![],
+        log: vec![],
         data: None,
     })
 }
 
+/// used to authenticate that the caller of a function that is restricted to auctions is an
+/// auction the factory created
 pub struct AuthResult {
+    /// used to return the loaded list of active auctions
     pub active: Option<HashSet<Vec<u8>>>,
+    /// possible error of failed authentication
     pub error: Option<HandleResult>,
 }
 
 impl AuthResult {
+    /// Returns StdResult<Self>
+    ///
+    /// verifies that the auction is in the list of active auctions
+    ///
+    /// # Arguments
+    ///
+    /// * `storage` - a reference to contract's storage
+    /// * `auction` - a reference to the auction's address
     pub fn authenticate_auction<S: Storage>(
         storage: &S,
         auction: &CanonicalAddr,
@@ -637,17 +678,28 @@ impl AuthResult {
     }
 }
 
+/// Returns HandleResult
+///
+/// allows admin to add a new auction version to the list of compatible auctions
+///
+/// # Arguments
+///
+/// * `deps` - mutable reference to Extern containing all the contract's external dependencies
+/// * `env` - Env of contract's environment
+/// * `auction_contract` - AuctionContractInfo of the new auction version
 fn try_new_contract<S: Storage, A: Api, Q: Querier>(
     deps: &mut Extern<S, A, Q>,
     env: Env,
     auction_contract: AuctionContractInfo,
 ) -> HandleResult {
+    // only allow admin to do this
     let admin: HumanAddr = load(&deps.storage, ADMIN_KEY)?;
     if env.message.sender != admin {
         return Err(StdError::generic_err(
             "This is an admin command. Admin commands can only be run from admin address",
         ));
     }
+    // add to the version list
     let mut versions: Vec<AuctionContractInfo> = load(&deps.storage, VERSION_KEY)?;
     versions.push(auction_contract);
     save(&mut deps.storage, VERSION_KEY, &versions)?;
@@ -662,17 +714,28 @@ fn try_new_contract<S: Storage, A: Api, Q: Querier>(
     })
 }
 
+/// Returns HandleResult
+///
+/// allows admin to change the factory status to (dis)allow the creation of new auctions
+///
+/// # Arguments
+///
+/// * `deps` - mutable reference to Extern containing all the contract's external dependencies
+/// * `env` - Env of contract's environment
+/// * `stop` - true if the factory should disallow auction creation
 fn try_set_status<S: Storage, A: Api, Q: Querier>(
     deps: &mut Extern<S, A, Q>,
     env: Env,
     stop: bool,
 ) -> HandleResult {
+    // only allow admin to do this
     let admin: HumanAddr = load(&deps.storage, ADMIN_KEY)?;
     if env.message.sender != admin {
         return Err(StdError::generic_err(
             "This is an admin command. Admin commands can only be run from admin address",
         ));
     }
+    // save status
     save(&mut deps.storage, STATUS_KEY, &stop)?;
 
     Ok(HandleResponse {
@@ -685,11 +748,21 @@ fn try_set_status<S: Storage, A: Api, Q: Querier>(
     })
 }
 
+/// Returns HandleResult
+///
+/// create a viewing key and set it with any active auctions the sender is the bidder
+///
+/// # Arguments
+///
+/// * `deps` - mutable reference to Extern containing all the contract's external dependencies
+/// * `env` - Env of contract's environment
+/// * `entropy` - string slice to be used as an entropy source for randomization
 fn try_create_key<S: Storage, A: Api, Q: Querier>(
     deps: &mut Extern<S, A, Q>,
     env: Env,
     entropy: &str,
 ) -> HandleResult {
+    // create and store the key
     let prng_seed: Vec<u8> = load(&deps.storage, PRNG_SEED_KEY)?;
     let key = ViewingKey::new(&env, &prng_seed, entropy.as_ref());
     let message_sender = &deps.api.canonical_address(&env.message.sender)?;
@@ -701,11 +774,21 @@ fn try_create_key<S: Storage, A: Api, Q: Querier>(
     set_key_with_auctions(deps, &env.message.sender, message_sender, &keystr)
 }
 
+/// Returns HandleResult
+///
+/// sets the viewing key and set it with any active auctions the sender is the bidder
+///
+/// # Arguments
+///
+/// * `deps` - mutable reference to Extern containing all the contract's external dependencies
+/// * `env` - Env of contract's environment
+/// * `key` - string slice to be used as the viewing key
 fn try_set_key<S: Storage, A: Api, Q: Querier>(
     deps: &mut Extern<S, A, Q>,
     env: Env,
     key: &str,
 ) -> HandleResult {
+    // store the viewing key
     let vk = ViewingKey(key.to_string());
     let message_sender = &deps.api.canonical_address(&env.message.sender)?;
     let mut key_store = PrefixedStorage::new(PREFIX_VIEW_KEY, &mut deps.storage);
@@ -715,52 +798,40 @@ fn try_set_key<S: Storage, A: Api, Q: Querier>(
     set_key_with_auctions(deps, &env.message.sender, message_sender, &key)
 }
 
+/// Returns HandleResult
+///
+/// sets the viewing key with any active auctions the sender is the bidder
+///
+/// # Arguments
+///
+/// * `deps` - mutable reference to Extern containing all the contract's external dependencies
+/// * `msg_sender` - a reference to the human address of the person setting their key
+/// * `sender_raw` - a reference to the canonical address of the person setting their key
+/// * `keystr` - string slice to be used as the viewing key
 fn set_key_with_auctions<S: Storage, A: Api, Q: Querier>(
     deps: &mut Extern<S, A, Q>,
     msg_sender: &HumanAddr,
     sender_raw: &CanonicalAddr,
     keystr: &str,
 ) -> HandleResult {
-let mut tmplog = Vec::new();
-
+    let mut cosmos_msg = Vec::new();
     // clean up the bidder's list of active auctions
     let load_active: Option<HashSet<Vec<u8>>> = may_load(&deps.storage, ACTIVE_KEY)?;
-    // even if you can't update the active list, let the key get set
-    if load_active.is_none() {
-        return Ok(HandleResponse {
-            messages: vec![],
-            log: vec![],
-            data: Some(to_binary(&HandleAnswer::Status {
-                status: Success,
-                message: Some("didn't load active".to_string()),
 
-//                message: None,
-            })?),
-        });
-    }
-    let mut active = load_active.unwrap();
-    let mut update = false;
-    let mut bidder_store = PrefixedStorage::new(PREFIX_BIDDERS, &mut deps.storage);
-    
-    
-    
-    let load_auctions: Option<HashSet<Vec<u8>>> = may_load(&bidder_store, sender_raw.as_slice())?;
-tmplog.push(log("loaded auctions",format!("{:?}",load_auctions)));
-
-
-
-    let my_active = filter_only_active(&bidder_store, sender_raw, &mut active, &mut update)?;
-    // if list was updated, save it
-    if update {
-        save(&mut bidder_store, sender_raw.as_slice(), &my_active)?;
-    }
-tmplog.push(log("my active count",format!("{}",my_active.len())));
-    let mut cosmos_msg = Vec::new();
-    // set viewing key with every active auction you have a bid with
-    if !my_active.is_empty() {
-        let load_versions: Option<Vec<AuctionContractInfo>> = may_load(&deps.storage, VERSION_KEY)?;
-        if load_versions.is_none() {
-            return Ok(HandleResponse {
+    if let Some(mut active) = load_active {
+        let mut update = false;
+        let mut bidder_store = PrefixedStorage::new(PREFIX_BIDDERS, &mut deps.storage);
+        let my_active = filter_only_active(&bidder_store, sender_raw, &mut active, &mut update)?;
+        // if list was updated, save it
+        if update {
+            save(&mut bidder_store, sender_raw.as_slice(), &my_active)?;
+        }
+        // set viewing key with every active auction you have a bid with
+        if !my_active.is_empty() {
+            let load_versions: Option<Vec<AuctionContractInfo>> =
+                may_load(&deps.storage, VERSION_KEY)?;
+            if load_versions.is_none() {
+                return Ok(HandleResponse {
                 messages: vec![],
                 log: vec![],
                 data: Some(to_binary(&HandleAnswer::Status {
@@ -768,40 +839,50 @@ tmplog.push(log("my active count",format!("{}",my_active.len())));
                     message: Some("However, unable to set viewing key with individual auctions.  Version list is missing.".to_string()),
                 })?)
             });
-        }
-        let versions = load_versions.unwrap();
-        let read_infos = ReadonlyPrefixedStorage::new(PREFIX_ACTIVE_INFO, &deps.storage);
-        for addr in my_active {
-            let load_auction: Option<StoreAuctionInfo> = may_load(&read_infos, addr.as_slice())?;
-            if let Some(auction_info) = load_auction {
-tmplog.push(log("loaded auction info",format!("{:?}",auction_info)));
-
-                let get_contract_info = versions.get(auction_info.version as usize);
-                if let Some(contract_info) = get_contract_info {
-                    let set_msg = SetKeyMsg::SetViewingKey {
-                        bidder: msg_sender.clone(),
-                        key: keystr.to_string(),
-                    };
-                    let human = deps.api.human_address(&CanonicalAddr(Binary(addr)))?;
-                    cosmos_msg.push(set_msg.to_cosmos_msg(
-                        contract_info.code_hash.clone(),
-                        human,
-                        None,
-                    )?);
+            }
+            let versions = load_versions.unwrap();
+            let read_infos = ReadonlyPrefixedStorage::new(PREFIX_ACTIVE_INFO, &deps.storage);
+            for addr in my_active {
+                let load_auction: Option<StoreAuctionInfo> =
+                    may_load(&read_infos, addr.as_slice())?;
+                if let Some(auction_info) = load_auction {
+                    let get_contract_info = versions.get(auction_info.version as usize);
+                    if let Some(contract_info) = get_contract_info {
+                        // set key with this auction
+                        let set_msg = SetKeyMsg::SetViewingKey {
+                            bidder: msg_sender.clone(),
+                            key: keystr.to_string(),
+                        };
+                        let human = deps.api.human_address(&CanonicalAddr(Binary(addr)))?;
+                        cosmos_msg.push(set_msg.to_cosmos_msg(
+                            contract_info.code_hash.clone(),
+                            human,
+                            None,
+                        )?);
+                    }
                 }
             }
         }
     }
-
     Ok(HandleResponse {
         messages: cosmos_msg,
-
-        log: tmplog,
-
+        log: vec![],
         data: Some(to_binary(&HandleAnswer::ViewingKey {
-            key: keystr.to_string()})?)})
+            key: keystr.to_string(),
+        })?),
+    })
 }
 
+/// Returns StdResult<()>
+///
+/// add an auction to a seller's or bidder's list of closed auctions
+///
+/// # Arguments
+///
+/// * `storage` - mutable reference to contract's storage
+/// * `prefix` - prefix to storage of either seller's or bidder's closed auction lists
+/// * `person` - a reference to the canonical address of the person the list belongs to
+/// * `auction` - a reference to the canonical address of the auction to be added to list
 fn add_to_persons_closed<S: Storage>(
     storage: &mut S,
     prefix: &[u8],
@@ -816,30 +897,16 @@ fn add_to_persons_closed<S: Storage>(
     Ok(())
 }
 
-//fn add_to_persons_closed<S: Storage>(
-//  storage: &S,
-//prefix: &[u8],
-//    person: &CanonicalAddr,
-//  auction: &CanonicalAddr,
-//) -> StdResult<()> {
-//  let read = ReadonlyPrefixedStorage::new(prefix, &(*storage));
-//let mut store = PrefixedStorage::new(prefix, &mut (*storage));
-//    add_to_closed(&read, &mut store, person.as_slice(), auction)
-//}
-
-//fn add_to_closed<R: ReadonlyStorage, S: Storage>(
-//  readonly: &R,
-//storage: &mut S,
-//    key: &[u8],
-//  auction: &CanonicalAddr,
-//) -> StdResult<()> {
-//  let mut load_closed: Option<Vec<Vec<u8>>> = may_load(readonly, key)?;
-//let mut closed = load_closed.unwrap_or_default();
-//    closed.push(auction.as_slice().to_vec());
-//  save(storage, key, &closed)?;
-//Ok(())
-//}
-
+/// Returns StdResult<()>
+///
+/// remove an auction from a seller's or bidder's list of active auctions
+///
+/// # Arguments
+///
+/// * `storage` - mutable reference to contract's storage
+/// * `prefix` - prefix to storage of either seller's or bidder's active auction lists
+/// * `person` - a reference to the canonical address of the person the list belongs to
+/// * `auction` - a reference to the canonical address of the auction to be removed
 fn remove_from_persons_active<S: Storage>(
     storage: &mut S,
     prefix: &[u8],
@@ -855,55 +922,100 @@ fn remove_from_persons_active<S: Storage>(
     Ok(())
 }
 
-#[allow(clippy::needless_return)]
-fn filter_only_active<S: Storage>(
+/// Returns StdResult<HashSet<Vec<u8>>>
+///
+/// remove any closed auctions from the list
+///
+/// # Arguments
+///
+/// * `storage` - a reference to bidder's active list storage subspace
+/// * `address` - a reference to the canonical address of the person the list belongs to
+/// * `active` - a mutable reference to the HashSet list of active auctions
+/// * `updated` - will be changed to true if the person's list changed
+fn filter_only_active<S: ReadonlyStorage>(
     storage: &S,
     address: &CanonicalAddr,
     active: &mut HashSet<Vec<u8>>,
     updated: &mut bool,
 ) -> StdResult<HashSet<Vec<u8>>> {
-    //    let read_list = ReadonlyPrefixedStorage::new(PREFIX_BIDDERS, &(*storage));
+    // get person's current list
     let load_auctions: Option<HashSet<Vec<u8>>> = may_load(storage, address.as_slice())?;
 
+    // if there are active auctions in the list
     if let Some(my_auctions) = load_auctions {
         let start_len = my_auctions.len();
+        // only keep the intersection of the person's list and the active auctions list
         let my_active: HashSet<Vec<u8>> =
             my_auctions.iter().filter_map(|v| active.take(v)).collect();
         *updated = start_len != my_active.len();
-        return Ok(my_active);
+        Ok(my_active)
+    // if not just return an empty list
     } else {
         *updated = false;
         Ok(HashSet::new())
     }
 }
 
+/////////////////////////////////////// Query /////////////////////////////////////
+/// Returns QueryResult
+///
+/// # Arguments
+///
+/// * `deps` - reference to Extern containing all the contract's external dependencies
+/// * `msg` - QueryMsg passed in with the query call
 pub fn query<S: Storage, A: Api, Q: Querier>(deps: &Extern<S, A, Q>, msg: QueryMsg) -> QueryResult {
-        let response = match msg {
-            QueryMsg::ListMyAuctions { address, viewing_key, filter } => try_list_my(deps, &address, viewing_key, filter),
-            QueryMsg::ListActiveAuctions { } => try_list_active(deps),
-            QueryMsg::ListClosedAuctions { before, page_size } => try_list_closed(deps, before, page_size),
-        };
-        pad_query_result(response, BLOCK_SIZE)
+    let response = match msg {
+        QueryMsg::ListMyAuctions {
+            address,
+            viewing_key,
+            filter,
+        } => try_list_my(deps, &address, viewing_key, filter),
+        QueryMsg::ListActiveAuctions {} => try_list_active(deps),
+        QueryMsg::ListClosedAuctions { before, page_size } => {
+            try_list_closed(deps, before, page_size)
+        }
+    };
+    pad_query_result(response, BLOCK_SIZE)
 }
 
+/// Returns QueryResult listing the closed auctions
+///
+/// # Arguments
+///
+/// * `deps` - reference to Extern containing all the contract's external dependencies
+/// * `before` - optional u64 timestamp in seconds since epoch time to only list auctions
+///              that closed earlier
+/// * `page_size` - optional number of auctions to display
 fn try_list_closed<S: Storage, A: Api, Q: Querier>(
     deps: &Extern<S, A, Q>,
     before: Option<u64>,
     page_size: Option<u32>,
 ) -> QueryResult {
-    to_binary(&QueryAnswer::ListClosedAuctions{
+    to_binary(&QueryAnswer::ListClosedAuctions {
         closed: display_closed(&deps.api, &deps.storage, before, page_size)?,
     })
 }
 
-fn try_list_active<S: Storage, A: Api, Q: Querier>(
-    deps: &Extern<S, A, Q>,
-) -> QueryResult {
-    to_binary(&QueryAnswer::ListActiveAuctions{
+/// Returns QueryResult listing the active auctions
+///
+/// # Arguments
+///
+/// * `deps` - reference to Extern containing all the contract's external dependencies
+fn try_list_active<S: Storage, A: Api, Q: Querier>(deps: &Extern<S, A, Q>) -> QueryResult {
+    to_binary(&QueryAnswer::ListActiveAuctions {
         active: display_active_list(&deps.api, &deps.storage, None, ACTIVE_KEY)?,
     })
 }
 
+/// Returns QueryResult listing the auctions the address interacted with
+///
+/// # Arguments
+///
+/// * `deps` - reference to Extern containing all the contract's external dependencies
+/// * `address` - a reference to the address whose auctions should be listed
+/// * `viewing_key` - String key used to authenticate the query
+/// * `filter` - optional choice of display filters
+#[allow(clippy::or_fun_call)]
 fn try_list_my<S: Storage, A: Api, Q: Querier>(
     deps: &Extern<S, A, Q>,
     address: &HumanAddr,
@@ -911,59 +1023,117 @@ fn try_list_my<S: Storage, A: Api, Q: Querier>(
     filter: Option<FilterTypes>,
 ) -> QueryResult {
     let addr_raw = &deps.api.canonical_address(address)?;
+    // load the address' key
     let read_key = ReadonlyPrefixedStorage::new(PREFIX_VIEW_KEY, &deps.storage);
     let load_key: Option<ViewingKey> = may_load(&read_key, addr_raw.as_slice())?;
 
     let input_key = ViewingKey(viewing_key);
-    let expected_key = load_key.unwrap_or(ViewingKey("Still take time to check if none".to_string()));
+    // if address never set a key, still spend time to check something
+    let expected_key =
+        load_key.unwrap_or(ViewingKey("Still take time to check if none".to_string()));
 
     // if it matches
-        if input_key.check_viewing_key(&expected_key.to_hashed()) {
-            let mut active_lists: Option<MyActiveLists> = None;
-            let mut closed_lists: Option<MyClosedLists> = None;
-            let types = filter.unwrap_or(FilterTypes::All);
+    if input_key.check_viewing_key(&expected_key.to_hashed()) {
+        let mut active_lists: Option<MyActiveLists> = None;
+        let mut closed_lists: Option<MyClosedLists> = None;
+        // if no filter default to ALL
+        let types = filter.unwrap_or(FilterTypes::All);
 
-            if types == FilterTypes::Active || types == FilterTypes::All {
-                let seller_active = display_active_list(&deps.api, &deps.storage, Some(PREFIX_SELLERS_ACTIVE), addr_raw.as_slice())?;
-                let bidder_active = display_active_list(&deps.api, &deps.storage, Some(PREFIX_BIDDERS), addr_raw.as_slice())?;
-                if seller_active.is_some() || bidder_active.is_some() {
-                    active_lists = Some(MyActiveLists{as_seller: seller_active, as_bidder: bidder_active});
-                }
+        // list the active auctions
+        if types == FilterTypes::Active || types == FilterTypes::All {
+            let seller_active = display_active_list(
+                &deps.api,
+                &deps.storage,
+                Some(PREFIX_SELLERS_ACTIVE),
+                addr_raw.as_slice(),
+            )?;
+            let bidder_active = display_active_list(
+                &deps.api,
+                &deps.storage,
+                Some(PREFIX_BIDDERS),
+                addr_raw.as_slice(),
+            )?;
+            if seller_active.is_some() || bidder_active.is_some() {
+                active_lists = Some(MyActiveLists {
+                    as_seller: seller_active,
+                    as_bidder: bidder_active,
+                });
             }
-            if types == FilterTypes::Closed || types == FilterTypes::All {
-                let seller_closed = display_addr_closed(&deps.api, &deps.storage, PREFIX_SELLERS_CLOSED, addr_raw.as_slice())?;
-                let won = display_addr_closed(&deps.api, &deps.storage, PREFIX_WINNERS, addr_raw.as_slice())?;
-                if seller_closed.is_some() || won.is_some() {
-                    closed_lists = Some(MyClosedLists{as_seller: seller_closed, won});
-                }
+        }
+        // list the closed auctions
+        if types == FilterTypes::Closed || types == FilterTypes::All {
+            let seller_closed = display_addr_closed(
+                &deps.api,
+                &deps.storage,
+                PREFIX_SELLERS_CLOSED,
+                addr_raw.as_slice(),
+            )?;
+            let won = display_addr_closed(
+                &deps.api,
+                &deps.storage,
+                PREFIX_WINNERS,
+                addr_raw.as_slice(),
+            )?;
+            if seller_closed.is_some() || won.is_some() {
+                closed_lists = Some(MyClosedLists {
+                    as_seller: seller_closed,
+                    won,
+                });
             }
-         
-            return to_binary(&QueryAnswer::ListMyAuctions {
-                active: active_lists,
-                closed: closed_lists,
-            });
-        } else {
- 
+        }
 
-    to_binary(&QueryAnswer::ViewingKeyError {
-        error: "Wrong viewing key for this address or viewing key not set".to_string(),
-    })
-}
+        to_binary(&QueryAnswer::ListMyAuctions {
+            active: active_lists,
+            closed: closed_lists,
+        })
+    } else {
+        to_binary(&QueryAnswer::ViewingKeyError {
+            error: "Wrong viewing key for this address or viewing key not set".to_string(),
+        })
+    }
 }
 
+/// Returns StdResult<Option<Vec<AuctionInfo>>>
+///
+/// provide the appropriate list of active auctions
+///
+/// # Arguments
+///
+/// * `api` - reference to the Api used to convert canonical and human addresses
+/// * `storage` - a reference to the contract's storage
+/// * `prefix` - optional storage prefix to load from
+/// * `key` - storage key to read
 fn display_active_list<S: ReadonlyStorage, A: Api>(
     api: &A,
     storage: &S,
     prefix: Option<&[u8]>,
     key: &[u8],
 ) -> StdResult<Option<Vec<AuctionInfo>>> {
-    let load_list: Option<HashSet<Vec<u8>>> =
-    if let Some(pref) = prefix {
+    let load_list: Option<HashSet<Vec<u8>>> = if let Some(pref) = prefix {
+        // reading a person's list
         let read = &ReadonlyPrefixedStorage::new(pref, storage);
-        may_load(read, key)?
+        // if reading a bidder's list
+        if pref == PREFIX_BIDDERS {
+            // read the factory's active list
+            let load_active: Option<HashSet<Vec<u8>>> = may_load(storage, ACTIVE_KEY)?;
+            if let Some(mut active) = load_active {
+                let mut update = false;
+                let canonical = CanonicalAddr(Binary(key.to_vec()));
+                // remove any auctions that closed from the list
+                let my_active = filter_only_active(read, &canonical, &mut active, &mut update)?;
+                Some(my_active)
+            } else {
+                None
+            }
+        // read a seller's list
+        } else {
+            may_load(read, key)?
+        }
+    // read the factory's active list
     } else {
         may_load(storage, key)?
     };
+    // turn list of active auctions to a vec of displayable auction infos
     let mut actives = match load_list {
         Some(list) => {
             let mut display_list = Vec::new();
@@ -978,17 +1148,23 @@ fn display_active_list<S: ReadonlyStorage, A: Api>(
                     if let Some(sell_sym) = may_sell_sym {
                         let may_bid_sym = symbols.get(info.bid_symbol as usize);
                         if let Some(bid_sym) = may_bid_sym {
-                            let pair = format!("{}-{}",sell_sym, bid_sym);
-                            display_list.push(AuctionInfo{address: api.human_address(&CanonicalAddr::from(addr.as_slice()))?, label: info.label, pair});
+                            let pair = format!("{}-{}", sell_sym, bid_sym);
+                            display_list.push(AuctionInfo {
+                                address: api
+                                    .human_address(&CanonicalAddr::from(addr.as_slice()))?,
+                                label: info.label,
+                                pair,
+                            });
                         }
                     }
                 }
             }
             display_list
-        },
-        None => Vec::new()
+        }
+        None => Vec::new(),
     };
-    actives.sort_by(|a, b| { a.pair.cmp(&b.pair)});
+    // sort it by pair
+    actives.sort_by(|a, b| a.pair.cmp(&b.pair));
     if actives.is_empty() {
         Ok(None)
     } else {
@@ -996,6 +1172,16 @@ fn display_active_list<S: ReadonlyStorage, A: Api>(
     }
 }
 
+/// Returns StdResult<Option<Vec<ClosedAuctionInfo>>>
+///
+/// provide the appropriate list of closed auctions
+///
+/// # Arguments
+///
+/// * `api` - reference to the Api used to convert canonical and human addresses
+/// * `storage` - a reference to the contract's storage
+/// * `prefix` - storage prefix to load from
+/// * `key` - storage key to read
 fn display_addr_closed<S: ReadonlyStorage, A: Api>(
     api: &A,
     storage: &S,
@@ -1003,45 +1189,65 @@ fn display_addr_closed<S: ReadonlyStorage, A: Api>(
     key: &[u8],
 ) -> StdResult<Option<Vec<ClosedAuctionInfo>>> {
     let read_closed = &ReadonlyPrefixedStorage::new(prefix, storage);
-    let load_list: Option<Vec<Vec<u8>>>  = may_load(read_closed, key)?;
+    let load_list: Option<Vec<Vec<u8>>> = may_load(read_closed, key)?;
     let closed = match load_list {
         Some(list) => {
             let mut display_list = Vec::new();
             let read_info = &ReadonlyPrefixedStorage::new(PREFIX_CLOSED_INFO, storage);
             // get token symbol strings
             let symbols: Vec<String> = load(storage, SYMBOLS_KEY)?;
+            // in reverse chronological order
             for addr in list.iter().rev() {
                 // get this auction's info
-                let load_info: Option<StoreClosedAuctionInfo> = may_load(read_info, addr.as_slice())?;
+                let load_info: Option<StoreClosedAuctionInfo> =
+                    may_load(read_info, addr.as_slice())?;
                 if let Some(info) = load_info {
                     let may_sell_sym = symbols.get(info.sell_symbol as usize);
                     if let Some(sell_sym) = may_sell_sym {
                         let may_bid_sym = symbols.get(info.bid_symbol as usize);
                         if let Some(bid_sym) = may_bid_sym {
-                            let pair = format!("{}-{}",sell_sym, bid_sym);
-                            display_list.push(ClosedAuctionInfo{address: api.human_address(&CanonicalAddr::from(addr.as_slice()))?, label: info.label, pair, winning_bid: info.winning_bid.map(|n| Uint128(n)), timestamp: info.timestamp});
+                            let pair = format!("{}-{}", sell_sym, bid_sym);
+                            display_list.push(ClosedAuctionInfo {
+                                address: api
+                                    .human_address(&CanonicalAddr::from(addr.as_slice()))?,
+                                label: info.label,
+                                pair,
+                                winning_bid: info.winning_bid.map(Uint128),
+                                timestamp: info.timestamp,
+                            });
                         }
                     }
                 }
             }
             display_list
-        },
-        None => Vec::new()
+        }
+        None => Vec::new(),
     };
-    if closed.is_empty(){
+    if closed.is_empty() {
         Ok(None)
     } else {
         Ok(Some(closed))
     }
 }
 
+/// Returns StdResult<Option<Vec<ClosedAuctionInfo>>>
+///
+/// provide the factory's list of closed auctions
+///
+/// # Arguments
+///
+/// * `api` - reference to the Api used to convert canonical and human addresses
+/// * `storage` - a reference to the contract's storage
+/// * `start` - optional u64 timestamp in seconds since epoch time to only list auctions
+///              that closed earlier
+/// * `page_size` - optional number of auctions to display
 fn display_closed<S: ReadonlyStorage, A: Api>(
     api: &A,
     storage: &S,
     start: Option<u64>,
     page_size: Option<u32>,
 ) -> StdResult<Option<Vec<ClosedAuctionInfo>>> {
-    let load_list: Option<BTreeMap<u64, Vec<u8>>>  = may_load(storage, CLOSED_KEY)?;
+    let load_list: Option<BTreeMap<u64, Vec<u8>>> = may_load(storage, CLOSED_KEY)?;
     let closed = match load_list {
         Some(mut list) => {
             let mut display_list = Vec::new();
@@ -1053,24 +1259,32 @@ fn display_closed<S: ReadonlyStorage, A: Api>(
                 // start iterating from the last close or before given start point
                 let begin = start.unwrap_or(max + 1);
                 let quant = page_size.unwrap_or(200) as usize;
-                // grab the first 200 backwards from the starting point
+                // grab backwards from the starting point
                 for (_k, addr) in list.range_mut(..begin).rev().take(quant) {
-                    let load_info: Option<StoreClosedAuctionInfo> = may_load(read_info, addr.as_slice())?;
+                    let load_info: Option<StoreClosedAuctionInfo> =
+                        may_load(read_info, addr.as_slice())?;
                     if let Some(info) = load_info {
                         let may_sell_sym = symbols.get(info.sell_symbol as usize);
                         if let Some(sell_sym) = may_sell_sym {
                             let may_bid_sym = symbols.get(info.bid_symbol as usize);
                             if let Some(bid_sym) = may_bid_sym {
-                                let pair = format!("{}-{}",sell_sym, bid_sym);
-                                display_list.push(ClosedAuctionInfo{address: api.human_address(&CanonicalAddr::from(addr.as_slice()))?, label: info.label, pair, winning_bid: info.winning_bid.map(|n| Uint128(n)), timestamp: info.timestamp});
+                                let pair = format!("{}-{}", sell_sym, bid_sym);
+                                display_list.push(ClosedAuctionInfo {
+                                    address: api
+                                        .human_address(&CanonicalAddr::from(addr.as_slice()))?,
+                                    label: info.label,
+                                    pair,
+                                    winning_bid: info.winning_bid.map(Uint128),
+                                    timestamp: info.timestamp,
+                                });
                             }
                         }
                     }
                 }
             }
             display_list
-        },
-        None => Vec::new()
+        }
+        None => Vec::new(),
     };
     if closed.is_empty() {
         Ok(None)
