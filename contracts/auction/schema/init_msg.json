@@ -5,9 +5,15 @@
   "type": "object",
   "required": [
     "bid_contract",
+    "bid_symbol",
+    "factory",
+    "label",
     "minimum_bid",
     "sell_amount",
-    "sell_contract"
+    "sell_contract",
+    "sell_symbol",
+    "seller",
+    "version"
   ],
   "properties": {
     "bid_contract": {
@@ -18,6 +24,12 @@
         }
       ]
     },
+    "bid_symbol": {
+      "description": "bid symbol index",
+      "type": "integer",
+      "format": "uint16",
+      "minimum": 0.0
+    },
     "description": {
       "description": "Optional free-form description of the auction (best to avoid double quotes). As an example it could be the date the owner will likely finalize the auction, or a list of other auctions for the same token, etc...",
       "default": null,
@@ -25,6 +37,18 @@
         "string",
         "null"
       ]
+    },
+    "factory": {
+      "description": "factory contract code hash and address",
+      "allOf": [
+        {
+          "$ref": "#/definitions/ContractInfo"
+        }
+      ]
+    },
+    "label": {
+      "description": "String label for the auction",
+      "type": "string"
     },
     "minimum_bid": {
       "description": "minimum bid that will be accepted",
@@ -49,6 +73,26 @@
           "$ref": "#/definitions/ContractInfo"
         }
       ]
+    },
+    "sell_symbol": {
+      "description": "sell symbol index",
+      "type": "integer",
+      "format": "uint16",
+      "minimum": 0.0
+    },
+    "seller": {
+      "description": "auction seller",
+      "allOf": [
+        {
+          "$ref": "#/definitions/HumanAddr"
+        }
+      ]
+    },
+    "version": {
+      "description": "auction version number",
+      "type": "integer",
+      "format": "uint8",
+      "minimum": 0.0
     }
   },
   "definitions": {

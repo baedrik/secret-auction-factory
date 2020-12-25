@@ -4,16 +4,101 @@
   "description": "Queries",
   "anyOf": [
     {
-      "description": "Displays the auction information",
+      "description": "lists all auctions the given address has owned, won, or have an active bid",
       "type": "object",
       "required": [
-        "auction_info"
+        "list_my_auctions"
       ],
       "properties": {
-        "auction_info": {
+        "list_my_auctions": {
+          "type": "object",
+          "required": [
+            "address",
+            "viewing_key"
+          ],
+          "properties": {
+            "address": {
+              "$ref": "#/definitions/HumanAddr"
+            },
+            "filter": {
+              "description": "optional filter for only active or closed auctions.  If not specified, lists all",
+              "default": null,
+              "anyOf": [
+                {
+                  "$ref": "#/definitions/FilterTypes"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "viewing_key": {
+              "description": "viewing key",
+              "type": "string"
+            }
+          }
+        }
+      }
+    },
+    {
+      "description": "lists all active auctions sorted by pair",
+      "type": "object",
+      "required": [
+        "list_active_auctions"
+      ],
+      "properties": {
+        "list_active_auctions": {
           "type": "object"
         }
       }
+    },
+    {
+      "description": "lists closed auctions in reverse chronological order.  If you specify page size, it return only that number of auctions (default is 200).  If you specify the before timestamp, it will start listing from the first auction that closed before the timestamp (in number of seconds since epoch 01/01/1970).  If you are paginating, you would take the timestamp of the last auction you receive, and specify that as the before timestamp on your next query so it will continue where it left off",
+      "type": "object",
+      "required": [
+        "list_closed_auctions"
+      ],
+      "properties": {
+        "list_closed_auctions": {
+          "type": "object",
+          "properties": {
+            "before": {
+              "description": "optionally only show auctions that closed before this timestamp (number of seconds from epoch 01/01/1970)",
+              "default": null,
+              "type": [
+                "integer",
+                "null"
+              ],
+              "format": "uint64",
+              "minimum": 0.0
+            },
+            "page_size": {
+              "description": "optional number of auctions to return",
+              "default": null,
+              "type": [
+                "integer",
+                "null"
+              ],
+              "format": "uint32",
+              "minimum": 0.0
+            }
+          }
+        }
+      }
     }
-  ]
+  ],
+  "definitions": {
+    "FilterTypes": {
+      "description": "the filter types when viewing an address' auctions",
+      "type": "string",
+      "enum": [
+        "active",
+        "closed",
+        "all"
+      ]
+    },
+    "HumanAddr": {
+      "type": "string"
+    }
+  }
 }

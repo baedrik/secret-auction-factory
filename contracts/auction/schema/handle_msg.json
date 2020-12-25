@@ -71,18 +71,6 @@
       }
     },
     {
-      "description": "ViewBid will display the amount of the active bid made by the calling address and time the bid was placed",
-      "type": "object",
-      "required": [
-        "view_bid"
-      ],
-      "properties": {
-        "view_bid": {
-          "type": "object"
-        }
-      }
-    },
-    {
       "description": "Finalize will close the auction",
       "type": "object",
       "required": [
@@ -112,6 +100,36 @@
       "properties": {
         "return_all": {
           "type": "object"
+        }
+      }
+    },
+    {
+      "description": "SetViewingkey can only be called by the factory contract to ensure all auctions use the same viewing key for one user",
+      "type": "object",
+      "required": [
+        "set_viewing_key"
+      ],
+      "properties": {
+        "set_viewing_key": {
+          "type": "object",
+          "required": [
+            "bidder",
+            "key"
+          ],
+          "properties": {
+            "bidder": {
+              "description": "set key for this address",
+              "allOf": [
+                {
+                  "$ref": "#/definitions/HumanAddr"
+                }
+              ]
+            },
+            "key": {
+              "description": "viewing key",
+              "type": "string"
+            }
+          }
         }
       }
     }

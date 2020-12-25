@@ -106,6 +106,17 @@
               "description": "execution description",
               "type": "string"
             },
+            "minimum_bid": {
+              "description": "Optional minimum bid amount",
+              "anyOf": [
+                {
+                  "$ref": "#/definitions/Uint128"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
             "previous_bid": {
               "description": "Optional amount of previous bid returned from escrow",
               "anyOf": [

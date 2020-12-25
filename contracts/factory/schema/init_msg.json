@@ -4,81 +4,43 @@
   "description": "Instantiation message",
   "type": "object",
   "required": [
-    "bid_contract",
-    "minimum_bid",
-    "sell_amount",
-    "sell_contract"
+    "auction_contract",
+    "entropy"
   ],
   "properties": {
-    "bid_contract": {
-      "description": "bid contract code hash and address",
+    "auction_contract": {
+      "description": "auction contract info",
       "allOf": [
         {
-          "$ref": "#/definitions/ContractInfo"
+          "$ref": "#/definitions/AuctionContractInfo"
         }
       ]
     },
-    "description": {
-      "description": "Optional free-form description of the auction (best to avoid double quotes). As an example it could be the date the owner will likely finalize the auction, or a list of other auctions for the same token, etc...",
-      "default": null,
-      "type": [
-        "string",
-        "null"
-      ]
-    },
-    "minimum_bid": {
-      "description": "minimum bid that will be accepted",
-      "allOf": [
-        {
-          "$ref": "#/definitions/Uint128"
-        }
-      ]
-    },
-    "sell_amount": {
-      "description": "amount of tokens being sold",
-      "allOf": [
-        {
-          "$ref": "#/definitions/Uint128"
-        }
-      ]
-    },
-    "sell_contract": {
-      "description": "sell contract code hash and address",
-      "allOf": [
-        {
-          "$ref": "#/definitions/ContractInfo"
-        }
-      ]
+    "entropy": {
+      "description": "entropy used to generate prng seed",
+      "type": "string"
     }
   },
   "definitions": {
-    "ContractInfo": {
-      "description": "code hash and address of a contract",
+    "AuctionContractInfo": {
+      "description": "Info needed to instantiate an auction",
       "type": "object",
       "required": [
-        "address",
-        "code_hash"
+        "code_hash",
+        "code_id"
       ],
       "properties": {
-        "address": {
-          "description": "contract's address",
-          "allOf": [
-            {
-              "$ref": "#/definitions/HumanAddr"
-            }
-          ]
-        },
         "code_hash": {
-          "description": "contract's code hash string",
+          "description": "code hash of the stored auction contract",
           "type": "string"
+        },
+        "code_id": {
+          "description": "code id of the stored auction contract",
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0.0
         }
       }
-    },
-    "HumanAddr": {
-      "type": "string"
-    },
-    "Uint128": {
-      "type": "string"
     }
   }
 }

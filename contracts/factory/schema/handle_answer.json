@@ -4,219 +4,20 @@
   "description": "Responses from handle functions",
   "anyOf": [
     {
-      "description": "response from consign attempt",
+      "description": "response from creating a viewing key",
       "type": "object",
       "required": [
-        "consign"
+        "viewing_key"
       ],
       "properties": {
-        "consign": {
+        "viewing_key": {
           "type": "object",
           "required": [
-            "message",
-            "status"
+            "key"
           ],
           "properties": {
-            "amount_consigned": {
-              "description": "Optional amount consigned",
-              "anyOf": [
-                {
-                  "$ref": "#/definitions/Uint128"
-                },
-                {
-                  "type": "null"
-                }
-              ]
-            },
-            "amount_needed": {
-              "description": "Optional amount that still needs to be consigned",
-              "anyOf": [
-                {
-                  "$ref": "#/definitions/Uint128"
-                },
-                {
-                  "type": "null"
-                }
-              ]
-            },
-            "amount_returned": {
-              "description": "Optional amount of tokens returned from escrow",
-              "anyOf": [
-                {
-                  "$ref": "#/definitions/Uint128"
-                },
-                {
-                  "type": "null"
-                }
-              ]
-            },
-            "message": {
-              "description": "execution description",
+            "key": {
               "type": "string"
-            },
-            "status": {
-              "description": "success or failure",
-              "allOf": [
-                {
-                  "$ref": "#/definitions/ResponseStatus"
-                }
-              ]
-            }
-          }
-        }
-      }
-    },
-    {
-      "description": "response from bid attempt",
-      "type": "object",
-      "required": [
-        "bid"
-      ],
-      "properties": {
-        "bid": {
-          "type": "object",
-          "required": [
-            "message",
-            "status"
-          ],
-          "properties": {
-            "amount_bid": {
-              "description": "Optional amount bid",
-              "anyOf": [
-                {
-                  "$ref": "#/definitions/Uint128"
-                },
-                {
-                  "type": "null"
-                }
-              ]
-            },
-            "amount_returned": {
-              "description": "Optional amount of tokens returned from escrow",
-              "anyOf": [
-                {
-                  "$ref": "#/definitions/Uint128"
-                },
-                {
-                  "type": "null"
-                }
-              ]
-            },
-            "message": {
-              "description": "execution description",
-              "type": "string"
-            },
-            "previous_bid": {
-              "description": "Optional amount of previous bid returned from escrow",
-              "anyOf": [
-                {
-                  "$ref": "#/definitions/Uint128"
-                },
-                {
-                  "type": "null"
-                }
-              ]
-            },
-            "status": {
-              "description": "success or failure",
-              "allOf": [
-                {
-                  "$ref": "#/definitions/ResponseStatus"
-                }
-              ]
-            }
-          }
-        }
-      }
-    },
-    {
-      "description": "response from closing the auction",
-      "type": "object",
-      "required": [
-        "close_auction"
-      ],
-      "properties": {
-        "close_auction": {
-          "type": "object",
-          "required": [
-            "message",
-            "status"
-          ],
-          "properties": {
-            "amount_returned": {
-              "description": "Optional amount of tokens returned form escrow",
-              "anyOf": [
-                {
-                  "$ref": "#/definitions/Uint128"
-                },
-                {
-                  "type": "null"
-                }
-              ]
-            },
-            "message": {
-              "description": "execution description",
-              "type": "string"
-            },
-            "status": {
-              "description": "success or failure",
-              "allOf": [
-                {
-                  "$ref": "#/definitions/ResponseStatus"
-                }
-              ]
-            },
-            "winning_bid": {
-              "description": "Optional amount of winning bid",
-              "anyOf": [
-                {
-                  "$ref": "#/definitions/Uint128"
-                },
-                {
-                  "type": "null"
-                }
-              ]
-            }
-          }
-        }
-      }
-    },
-    {
-      "description": "response from attempt to retract bid",
-      "type": "object",
-      "required": [
-        "retract_bid"
-      ],
-      "properties": {
-        "retract_bid": {
-          "type": "object",
-          "required": [
-            "message",
-            "status"
-          ],
-          "properties": {
-            "amount_returned": {
-              "description": "Optional amount of tokens returned from escrow",
-              "anyOf": [
-                {
-                  "$ref": "#/definitions/Uint128"
-                },
-                {
-                  "type": "null"
-                }
-              ]
-            },
-            "message": {
-              "description": "execution description",
-              "type": "string"
-            },
-            "status": {
-              "description": "success or failure",
-              "allOf": [
-                {
-                  "$ref": "#/definitions/ResponseStatus"
-                }
-              ]
             }
           }
         }
@@ -232,13 +33,15 @@
         "status": {
           "type": "object",
           "required": [
-            "message",
             "status"
           ],
           "properties": {
             "message": {
               "description": "execution description",
-              "type": "string"
+              "type": [
+                "string",
+                "null"
+              ]
             },
             "status": {
               "description": "success or failure",
@@ -261,9 +64,6 @@
         "Success",
         "Failure"
       ]
-    },
-    "Uint128": {
-      "type": "string"
     }
   }
 }

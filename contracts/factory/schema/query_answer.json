@@ -4,72 +4,103 @@
   "description": "responses to queries",
   "anyOf": [
     {
-      "description": "AuctionInfo query response",
+      "description": "List the auctions where address is either the seller of bidder (or won)",
       "type": "object",
       "required": [
-        "auction_info"
+        "list_my_auctions"
       ],
       "properties": {
-        "auction_info": {
+        "list_my_auctions": {
+          "type": "object",
+          "properties": {
+            "active": {
+              "description": "lists of the address' active auctions",
+              "anyOf": [
+                {
+                  "$ref": "#/definitions/MyActiveLists"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "closed": {
+              "description": "lists of the address' closed auctions",
+              "anyOf": [
+                {
+                  "$ref": "#/definitions/MyClosedLists"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          }
+        }
+      }
+    },
+    {
+      "description": "List active auctions sorted by pair",
+      "type": "object",
+      "required": [
+        "list_active_auctions"
+      ],
+      "properties": {
+        "list_active_auctions": {
+          "type": "object",
+          "properties": {
+            "active": {
+              "description": "active auctions sorted by pair",
+              "type": [
+                "array",
+                "null"
+              ],
+              "items": {
+                "$ref": "#/definitions/AuctionInfo"
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "description": "List closed auctions in reverse chronological order",
+      "type": "object",
+      "required": [
+        "list_closed_auctions"
+      ],
+      "properties": {
+        "list_closed_auctions": {
+          "type": "object",
+          "properties": {
+            "closed": {
+              "description": "closed auctions in reverse chronological order",
+              "type": [
+                "array",
+                "null"
+              ],
+              "items": {
+                "$ref": "#/definitions/ClosedAuctionInfo"
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "description": "Viewing Key Error",
+      "type": "object",
+      "required": [
+        "viewing_key_error"
+      ],
+      "properties": {
+        "viewing_key_error": {
           "type": "object",
           "required": [
-            "auction_address",
-            "bid_token",
-            "minimum_bid",
-            "sell_amount",
-            "sell_token",
-            "status"
+            "error"
           ],
           "properties": {
-            "auction_address": {
-              "description": "address of auction contract",
-              "allOf": [
-                {
-                  "$ref": "#/definitions/HumanAddr"
-                }
-              ]
-            },
-            "bid_token": {
-              "description": "bid token address and TokenInfo query response",
-              "allOf": [
-                {
-                  "$ref": "#/definitions/Token"
-                }
-              ]
-            },
-            "description": {
-              "description": "Optional String description of auction",
-              "type": [
-                "string",
-                "null"
-              ]
-            },
-            "minimum_bid": {
-              "description": "minimum bid that will be accepted",
-              "allOf": [
-                {
-                  "$ref": "#/definitions/Uint128"
-                }
-              ]
-            },
-            "sell_amount": {
-              "description": "amount of tokens being sold",
-              "allOf": [
-                {
-                  "$ref": "#/definitions/Uint128"
-                }
-              ]
-            },
-            "sell_token": {
-              "description": "sell token address and TokenInfo query response",
-              "allOf": [
-                {
-                  "$ref": "#/definitions/Token"
-                }
-              ]
-            },
-            "status": {
-              "description": "status of the auction can be \"Accepting bids: Tokens to be sold have(not) been consigned\" or \"Closed\" (will also state if there are outstanding funds after auction closure",
+            "error": {
               "type": "string"
             }
           }
@@ -78,56 +109,67 @@
     }
   ],
   "definitions": {
-    "HumanAddr": {
-      "type": "string"
-    },
-    "Token": {
-      "description": "token's contract address and TokenInfo response",
+    "AuctionInfo": {
+      "description": "active auction display info",
       "type": "object",
       "required": [
-        "contract_address",
-        "token_info"
+        "address",
+        "label",
+        "pair"
       ],
       "properties": {
-        "contract_address": {
-          "description": "contract address of token",
+        "address": {
+          "description": "auction address",
           "allOf": [
             {
               "$ref": "#/definitions/HumanAddr"
             }
           ]
         },
-        "token_info": {
-          "description": "Tokeninfo query response",
-          "allOf": [
-            {
-              "$ref": "#/definitions/TokenInfo"
-            }
-          ]
+        "label": {
+          "description": "auction label",
+          "type": "string"
+        },
+        "pair": {
+          "description": "symbols of tokens for sale and being bid in form of SELL-BID",
+          "type": "string"
         }
       }
     },
-    "TokenInfo": {
-      "description": "TokenInfo response",
+    "ClosedAuctionInfo": {
+      "description": "closed auction display info",
       "type": "object",
       "required": [
-        "decimals",
-        "name",
-        "symbol"
+        "address",
+        "label",
+        "pair",
+        "timestamp"
       ],
       "properties": {
-        "decimals": {
+        "address": {
+          "description": "auction address",
+          "allOf": [
+            {
+              "$ref": "#/definitions/HumanAddr"
+            }
+          ]
+        },
+        "label": {
+          "description": "auction label",
+          "type": "string"
+        },
+        "pair": {
+          "description": "symbols of tokens for sale and being bid in form of SELL-BID",
+          "type": "string"
+        },
+        "timestamp": {
+          "description": "time the auction closed in seconds since epoch 01/01/1970",
           "type": "integer",
-          "format": "uint8",
+          "format": "uint64",
           "minimum": 0.0
         },
-        "name": {
-          "type": "string"
-        },
-        "symbol": {
-          "type": "string"
-        },
-        "total_supply": {
+        "winning_bid": {
+          "description": "winning bid",
           "anyOf": [
             {
               "$ref": "#/definitions/Uint128"
@@ -136,6 +178,61 @@
               "type": "null"
             }
           ]
+        }
+      }
+    },
+    "HumanAddr": {
+      "type": "string"
+    },
+    "MyActiveLists": {
+      "description": "Lists of active auctions sorted by pair where the address is a seller or bidder",
+      "type": "object",
+      "properties": {
+        "as_bidder": {
+          "description": "active auctions sorted by pair where the address is the bidder",
+          "type": [
+            "array",
+            "null"
+          ],
+          "items": {
+            "$ref": "#/definitions/AuctionInfo"
+          }
+        },
+        "as_seller": {
+          "description": "active auctions sorted by pair where the address is the seller",
+          "type": [
+            "array",
+            "null"
+          ],
+          "items": {
+            "$ref": "#/definitions/AuctionInfo"
+          }
+        }
+      }
+    },
+    "MyClosedLists": {
+      "description": "Lists of closed auctions in reverse chronological order where the address is a seller or won",
+      "type": "object",
+      "properties": {
+        "as_seller": {
+          "description": "closed auctions in reverse chronological order where the address is the seller",
+          "type": [
+            "array",
+            "null"
+          ],
+          "items": {
+            "$ref": "#/definitions/ClosedAuctionInfo"
+          }
+        },
+        "won": {
+          "description": "closed auctions in reverse chronological order where the address won",
+          "type": [
+            "array",
+            "null"
+          ],
+          "items": {
+            "$ref": "#/definitions/ClosedAuctionInfo"
+          }
         }
       }
     },

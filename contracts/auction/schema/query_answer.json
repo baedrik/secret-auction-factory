@@ -71,6 +71,78 @@
             "status": {
               "description": "status of the auction can be \"Accepting bids: Tokens to be sold have(not) been consigned\" or \"Closed\" (will also state if there are outstanding funds after auction closure",
               "type": "string"
+            },
+            "winning_bid": {
+              "description": "If the auction resulted in a swap, this will state the winning bid",
+              "anyOf": [
+                {
+                  "$ref": "#/definitions/Uint128"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          }
+        }
+      }
+    },
+    {
+      "description": "response from view bid attempt",
+      "type": "object",
+      "required": [
+        "bid"
+      ],
+      "properties": {
+        "bid": {
+          "type": "object",
+          "required": [
+            "message",
+            "status"
+          ],
+          "properties": {
+            "amount_bid": {
+              "description": "Optional amount bid",
+              "anyOf": [
+                {
+                  "$ref": "#/definitions/Uint128"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "message": {
+              "description": "execution description",
+              "type": "string"
+            },
+            "status": {
+              "description": "success or failure",
+              "allOf": [
+                {
+                  "$ref": "#/definitions/ResponseStatus"
+                }
+              ]
+            }
+          }
+        }
+      }
+    },
+    {
+      "description": "Viewing Key Error",
+      "type": "object",
+      "required": [
+        "viewing_key_error"
+      ],
+      "properties": {
+        "viewing_key_error": {
+          "type": "object",
+          "required": [
+            "error"
+          ],
+          "properties": {
+            "error": {
+              "type": "string"
             }
           }
         }
@@ -80,6 +152,14 @@
   "definitions": {
     "HumanAddr": {
       "type": "string"
+    },
+    "ResponseStatus": {
+      "description": "success or failure response",
+      "type": "string",
+      "enum": [
+        "Success",
+        "Failure"
+      ]
     },
     "Token": {
       "description": "token's contract address and TokenInfo response",

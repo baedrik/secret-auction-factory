@@ -14,6 +14,35 @@
           "type": "object"
         }
       }
+    },
+    {
+      "description": "View active bid for input address",
+      "type": "object",
+      "required": [
+        "view_bid"
+      ],
+      "properties": {
+        "view_bid": {
+          "type": "object",
+          "required": [
+            "address",
+            "viewing_key"
+          ],
+          "properties": {
+            "address": {
+              "$ref": "#/definitions/HumanAddr"
+            },
+            "viewing_key": {
+              "type": "string"
+            }
+          }
+        }
+      }
     }
-  ]
+  ],
+  "definitions": {
+    "HumanAddr": {
+      "type": "string"
+    }
+  }
 }

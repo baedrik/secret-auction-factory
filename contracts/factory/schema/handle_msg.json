@@ -4,53 +4,146 @@
   "description": "Handle messages",
   "anyOf": [
     {
-      "description": "Receive gets called by the token contracts of the auction.  If it came from the sale token, it will consign the sent tokens.  If it came from the bid token, it will place a bid.  If any other address tries to call this, it will give an error message that the calling address is not a token in the auction.",
+      "description": "CreateAuction will instantiate a new auction",
       "type": "object",
       "required": [
-        "receive"
+        "create_auction"
       ],
       "properties": {
-        "receive": {
+        "create_auction": {
           "type": "object",
           "required": [
-            "amount",
-            "from",
-            "sender"
+            "bid_contract",
+            "label",
+            "minimum_bid",
+            "sell_amount",
+            "sell_contract"
           ],
           "properties": {
-            "amount": {
-              "description": "amount of tokens sent",
+            "bid_contract": {
+              "description": "bid contract code hash and address",
+              "allOf": [
+                {
+                  "$ref": "#/definitions/ContractInfo"
+                }
+              ]
+            },
+            "description": {
+              "description": "Optional free-form description of the auction (best to avoid double quotes). As an example it could be the date the owner will likely finalize the auction, or a list of other auctions for the same token, etc...",
+              "default": null,
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "label": {
+              "description": "String label for the auction",
+              "type": "string"
+            },
+            "minimum_bid": {
+              "description": "minimum bid that will be accepted",
               "allOf": [
                 {
                   "$ref": "#/definitions/Uint128"
                 }
               ]
             },
-            "from": {
-              "description": "address of the owner of the tokens sent to the auction",
+            "sell_amount": {
+              "description": "amount of tokens being sold",
+              "allOf": [
+                {
+                  "$ref": "#/definitions/Uint128"
+                }
+              ]
+            },
+            "sell_contract": {
+              "description": "sell contract code hash and address",
+              "allOf": [
+                {
+                  "$ref": "#/definitions/ContractInfo"
+                }
+              ]
+            }
+          }
+        }
+      }
+    },
+    {
+      "description": "RegisterAuction saves the auction info of a newly instantiated auction and adds it to the list of active auctions as well as adding it to the seller's list of auctions\n\nOnly auctions will use this function",
+      "type": "object",
+      "required": [
+        "register_auction"
+      ],
+      "properties": {
+        "register_auction": {
+          "type": "object",
+          "required": [
+            "auction",
+            "seller"
+          ],
+          "properties": {
+            "auction": {
+              "description": "auction information needed by the factory",
+              "allOf": [
+                {
+                  "$ref": "#/definitions/StoreAuctionInfo"
+                }
+              ]
+            },
+            "seller": {
+              "description": "seller/creator of the auction",
               "allOf": [
                 {
                   "$ref": "#/definitions/HumanAddr"
                 }
               ]
-            },
-            "msg": {
-              "description": "Optional base64 encoded message sent with the Send call -- not needed or used by this contract",
+            }
+          }
+        }
+      }
+    },
+    {
+      "description": "CloseAuction tells the factory that the auction closed and provides the winning bid if appropriate\n\nOnly auctions will use this function",
+      "type": "object",
+      "required": [
+        "close_auction"
+      ],
+      "properties": {
+        "close_auction": {
+          "type": "object",
+          "required": [
+            "seller"
+          ],
+          "properties": {
+            "bidder": {
+              "description": "winning bidder if the auction ended in a swap",
               "default": null,
               "anyOf": [
                 {
-                  "$ref": "#/definitions/Binary"
+                  "$ref": "#/definitions/HumanAddr"
                 },
                 {
                   "type": "null"
                 }
               ]
             },
-            "sender": {
-              "description": "address of person or contract that sent the tokens that triggered this Receive",
+            "seller": {
+              "description": "auction seller",
               "allOf": [
                 {
                   "$ref": "#/definitions/HumanAddr"
+                }
+              ]
+            },
+            "winning_bid": {
+              "description": "winning bid if the auction ended in a swap",
+              "default": null,
+              "anyOf": [
+                {
+                  "$ref": "#/definitions/Uint128"
+                },
+                {
+                  "type": "null"
                 }
               ]
             }
@@ -59,70 +152,211 @@
       }
     },
     {
-      "description": "RetractBid will retract any active bid the calling address has made and return the tokens that are held in escrow",
+      "description": "RegisterBidder allows the factory to know an auction has a new bidder so it can update their list of auctions, as well a create a viewing key for the auction if one was set\n\nOnly auctions will use this function",
       "type": "object",
       "required": [
-        "retract_bid"
+        "register_bidder"
       ],
       "properties": {
-        "retract_bid": {
-          "type": "object"
-        }
-      }
-    },
-    {
-      "description": "ViewBid will display the amount of the active bid made by the calling address and time the bid was placed",
-      "type": "object",
-      "required": [
-        "view_bid"
-      ],
-      "properties": {
-        "view_bid": {
-          "type": "object"
-        }
-      }
-    },
-    {
-      "description": "Finalize will close the auction",
-      "type": "object",
-      "required": [
-        "finalize"
-      ],
-      "properties": {
-        "finalize": {
+        "register_bidder": {
           "type": "object",
           "required": [
-            "only_if_bids"
+            "bidder"
           ],
           "properties": {
-            "only_if_bids": {
-              "description": "true if auction creator wants to keep the auction open if there are no active bids",
-              "type": "boolean"
+            "bidder": {
+              "$ref": "#/definitions/HumanAddr"
             }
           }
         }
       }
     },
     {
-      "description": "If the auction holds any funds after it has closed (should never happen), this will return those funds to their owners.  Should never be needed, but included in case of unforeseen error",
+      "description": "RemoveBidder allows the factory to know a bidder retracted his bid from an auction\n\nOnly auctions will use this function",
       "type": "object",
       "required": [
-        "return_all"
+        "remove_bidder"
       ],
       "properties": {
-        "return_all": {
-          "type": "object"
+        "remove_bidder": {
+          "type": "object",
+          "required": [
+            "bidder"
+          ],
+          "properties": {
+            "bidder": {
+              "$ref": "#/definitions/HumanAddr"
+            }
+          }
+        }
+      }
+    },
+    {
+      "description": "Allows the admin to add a new auction contract version",
+      "type": "object",
+      "required": [
+        "new_auction_contract"
+      ],
+      "properties": {
+        "new_auction_contract": {
+          "type": "object",
+          "required": [
+            "auction_contract"
+          ],
+          "properties": {
+            "auction_contract": {
+              "$ref": "#/definitions/AuctionContractInfo"
+            }
+          }
+        }
+      }
+    },
+    {
+      "description": "Create a viewing key to be used with all factory and auction authenticated queries",
+      "type": "object",
+      "required": [
+        "create_viewing_key"
+      ],
+      "properties": {
+        "create_viewing_key": {
+          "type": "object",
+          "required": [
+            "entropy"
+          ],
+          "properties": {
+            "entropy": {
+              "type": "string"
+            }
+          }
+        }
+      }
+    },
+    {
+      "description": "Set a viewing key to be used with all factory and auction authenticated queries",
+      "type": "object",
+      "required": [
+        "set_viewing_key"
+      ],
+      "properties": {
+        "set_viewing_key": {
+          "type": "object",
+          "required": [
+            "key"
+          ],
+          "properties": {
+            "key": {
+              "type": "string"
+            },
+            "padding": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          }
+        }
+      }
+    },
+    {
+      "description": "Allows an admin to start/stop all auction creation",
+      "type": "object",
+      "required": [
+        "set_status"
+      ],
+      "properties": {
+        "set_status": {
+          "type": "object",
+          "required": [
+            "stop"
+          ],
+          "properties": {
+            "stop": {
+              "type": "boolean"
+            }
+          }
         }
       }
     }
   ],
   "definitions": {
-    "Binary": {
-      "description": "Binary is a wrapper around Vec<u8> to add base64 de/serialization with serde. It also adds some helper methods to help encode inline.\n\nThis is only needed as serde-json-{core,wasm} has a horrible encoding for Vec<u8>",
-      "type": "string"
+    "AuctionContractInfo": {
+      "description": "Info needed to instantiate an auction",
+      "type": "object",
+      "required": [
+        "code_hash",
+        "code_id"
+      ],
+      "properties": {
+        "code_hash": {
+          "description": "code hash of the stored auction contract",
+          "type": "string"
+        },
+        "code_id": {
+          "description": "code id of the stored auction contract",
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0.0
+        }
+      }
+    },
+    "ContractInfo": {
+      "description": "code hash and address of a contract",
+      "type": "object",
+      "required": [
+        "address",
+        "code_hash"
+      ],
+      "properties": {
+        "address": {
+          "description": "contract's address",
+          "allOf": [
+            {
+              "$ref": "#/definitions/HumanAddr"
+            }
+          ]
+        },
+        "code_hash": {
+          "description": "contract's code hash string",
+          "type": "string"
+        }
+      }
     },
     "HumanAddr": {
       "type": "string"
+    },
+    "StoreAuctionInfo": {
+      "description": "active auction info for storage",
+      "type": "object",
+      "required": [
+        "bid_symbol",
+        "label",
+        "sell_symbol",
+        "version"
+      ],
+      "properties": {
+        "bid_symbol": {
+          "description": "bid symbol index",
+          "type": "integer",
+          "format": "uint16",
+          "minimum": 0.0
+        },
+        "label": {
+          "description": "auction label",
+          "type": "string"
+        },
+        "sell_symbol": {
+          "description": "sell symbol index",
+          "type": "integer",
+          "format": "uint16",
+          "minimum": 0.0
+        },
+        "version": {
+          "description": "auction contract version number",
+          "type": "integer",
+          "format": "uint8",
+          "minimum": 0.0
+        }
+      }
     },
     "Uint128": {
       "type": "string"
