@@ -988,7 +988,7 @@ fn display_active_list<S: ReadonlyStorage, A: Api>(
         },
         None => Vec::new()
     };
-    actives.sort_by(|a, b| { b.pair.cmp(&a.pair)});
+    actives.sort_by(|a, b| { a.pair.cmp(&b.pair)});
     if actives.is_empty() {
         Ok(None)
     } else {
