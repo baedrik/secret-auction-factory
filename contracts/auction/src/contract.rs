@@ -40,6 +40,10 @@ pub struct FactoryAuctionInfo {
     pub sell_symbol: u16,
     /// bid symbol index
     pub bid_symbol: u16,
+    /// sell amount
+    pub sell_amount: Uint128,
+    /// minimum bid
+    pub minimum_bid: Uint128,
     /// auction contract version number
     pub version: u8,
 }
@@ -120,6 +124,8 @@ pub fn init<S: Storage, A: Api, Q: Querier>(
         label: msg.label,
         sell_symbol: msg.sell_symbol,
         bid_symbol: msg.bid_symbol,
+        sell_amount: msg.sell_amount,
+        minimum_bid: msg.minimum_bid,
         version: msg.version,
     };
 

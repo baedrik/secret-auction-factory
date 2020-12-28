@@ -86,7 +86,7 @@
               "description": "auction information needed by the factory",
               "allOf": [
                 {
-                  "$ref": "#/definitions/StoreAuctionInfo"
+                  "$ref": "#/definitions/RegisterAuctionInfo"
                 }
               ]
             },
@@ -324,12 +324,14 @@
     "HumanAddr": {
       "type": "string"
     },
-    "StoreAuctionInfo": {
+    "RegisterAuctionInfo": {
       "description": "active auction info for storage",
       "type": "object",
       "required": [
         "bid_symbol",
         "label",
+        "minimum_bid",
+        "sell_amount",
         "sell_symbol",
         "version"
       ],
@@ -343,6 +345,22 @@
         "label": {
           "description": "auction label",
           "type": "string"
+        },
+        "minimum_bid": {
+          "description": "minimum bid",
+          "allOf": [
+            {
+              "$ref": "#/definitions/Uint128"
+            }
+          ]
+        },
+        "sell_amount": {
+          "description": "sell amount",
+          "allOf": [
+            {
+              "$ref": "#/definitions/Uint128"
+            }
+          ]
         },
         "sell_symbol": {
           "description": "sell symbol index",

@@ -43,7 +43,7 @@ pub enum HandleMsg {
         /// seller/creator of the auction
         seller: HumanAddr,
         /// auction information needed by the factory
-        auction: StoreAuctionInfo,
+        auction: RegisterAuctionInfo,
     },
 
     /// CloseAuction tells the factory that the auction closed and provides the winning bid if appropriate
@@ -236,6 +236,41 @@ pub struct AuctionInfo {
     pub label: String,
     /// symbols of tokens for sale and being bid in form of SELL-BID
     pub pair: String,
+    /// sell amount
+    pub sell_amount: Uint128,
+    /// minimum bid
+    pub minimum_bid: Uint128,
+}
+
+/// active auction info for storage
+#[derive(Serialize, Deserialize, JsonSchema, Debug)]
+pub struct RegisterAuctionInfo {
+    /// auction label
+    pub label: String,
+    /// sell symbol index
+    pub sell_symbol: u16,
+    /// bid symbol index
+    pub bid_symbol: u16,
+    /// sell amount
+    pub sell_amount: Uint128,
+    /// minimum bid
+    pub minimum_bid: Uint128,
+    /// auction contract version number
+    pub version: u8,
+}
+
+impl RegisterAuctionInfo {
+    /// takes the register auction information and creates a store auction info struct
+    pub fn to_store_auction_info(&self) -> StoreAuctionInfo {
+        StoreAuctionInfo {
+            label: self.label.clone(),
+            sell_symbol: self.sell_symbol,
+            bid_symbol: self.bid_symbol,
+            sell_amount: self.sell_amount.u128(),
+            minimum_bid: self.minimum_bid.u128(),
+            version: self.version,
+        }
+    }
 }
 
 /// active auction info for storage
@@ -247,6 +282,10 @@ pub struct StoreAuctionInfo {
     pub sell_symbol: u16,
     /// bid symbol index
     pub bid_symbol: u16,
+    /// sell amount
+    pub sell_amount: u128,
+    /// minimum bid
+    pub minimum_bid: u128,
     /// auction contract version number
     pub version: u8,
 }
@@ -262,6 +301,7 @@ impl StoreAuctionInfo {
             label: self.label.clone(),
             sell_symbol: self.sell_symbol,
             bid_symbol: self.bid_symbol,
+            sell_amount: self.sell_amount,
             winning_bid,
             timestamp,
         }
@@ -277,6 +317,8 @@ pub struct ClosedAuctionInfo {
     pub label: String,
     /// symbols of tokens for sale and being bid in form of SELL-BID
     pub pair: String,
+    /// sell amount
+    pub sell_amount: Uint128,
     /// winning bid
     #[serde(skip_serializing_if = "Option::is_none")]
     pub winning_bid: Option<Uint128>,
@@ -293,6 +335,8 @@ pub struct StoreClosedAuctionInfo {
     pub sell_symbol: u16,
     /// bid symbol index
     pub bid_symbol: u16,
+    /// sell amount
+    pub sell_amount: u128,
     /// winning bid
     pub winning_bid: Option<u128>,
     /// time the auction closed in seconds since epoch 01/01/1970

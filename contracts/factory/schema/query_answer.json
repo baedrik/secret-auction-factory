@@ -115,7 +115,9 @@
       "required": [
         "address",
         "label",
-        "pair"
+        "minimum_bid",
+        "pair",
+        "sell_amount"
       ],
       "properties": {
         "address": {
@@ -130,9 +132,25 @@
           "description": "auction label",
           "type": "string"
         },
+        "minimum_bid": {
+          "description": "minimum bid",
+          "allOf": [
+            {
+              "$ref": "#/definitions/Uint128"
+            }
+          ]
+        },
         "pair": {
           "description": "symbols of tokens for sale and being bid in form of SELL-BID",
           "type": "string"
+        },
+        "sell_amount": {
+          "description": "sell amount",
+          "allOf": [
+            {
+              "$ref": "#/definitions/Uint128"
+            }
+          ]
         }
       }
     },
@@ -143,6 +161,7 @@
         "address",
         "label",
         "pair",
+        "sell_amount",
         "timestamp"
       ],
       "properties": {
@@ -161,6 +180,14 @@
         "pair": {
           "description": "symbols of tokens for sale and being bid in form of SELL-BID",
           "type": "string"
+        },
+        "sell_amount": {
+          "description": "sell amount",
+          "allOf": [
+            {
+              "$ref": "#/definitions/Uint128"
+            }
+          ]
         },
         "timestamp": {
           "description": "time the auction closed in seconds since epoch 01/01/1970",

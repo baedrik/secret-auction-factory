@@ -17,7 +17,7 @@ use secret_toolkit::{
 
 use crate::msg::{
     AuctionContractInfo, AuctionInfo, ClosedAuctionInfo, ContractInfo, FilterTypes, HandleAnswer,
-    HandleMsg, InitMsg, MyActiveLists, MyClosedLists, QueryAnswer, QueryMsg,
+    HandleMsg, InitMsg, MyActiveLists, MyClosedLists, QueryAnswer, QueryMsg, RegisterAuctionInfo,
     ResponseStatus::Success, StoreAuctionInfo, StoreClosedAuctionInfo,
 };
 use crate::rand::sha_256;
@@ -322,28 +322,31 @@ fn try_create_auction<S: Storage, A: Api, Q: Querier>(
 /// * `deps` - mutable reference to Extern containing all the contract's external dependencies
 /// * `env` - Env of contract's environment
 /// * `seller` - reference to the address of the auction's seller
-/// * `auction` - reference to StoreAuctionInfo of the auction that is trying to register
+/// * `reg_auction` - reference to RegisterAuctionInfo of the auction that is trying to register
 fn try_register_auction<S: Storage, A: Api, Q: Querier>(
     deps: &mut Extern<S, A, Q>,
     env: Env,
     seller: &HumanAddr,
-    auction: &StoreAuctionInfo,
+    reg_auction: &RegisterAuctionInfo,
 ) -> HandleResult {
     // verify this is the auction we are waiting for
     let load_label: Option<String> = may_load(&deps.storage, PENDING_KEY)?;
     let auth_label =
         load_label.ok_or_else(|| StdError::generic_err("Unable to authenticate registration."))?;
-    if auth_label != auction.label {
+    if auth_label != reg_auction.label {
         return Err(StdError::generic_err(
             "Label does not match the auction we are creating",
         ));
     }
     remove(&mut deps.storage, PENDING_KEY);
 
+    // convert register auction info to storage format
+    let auction = reg_auction.to_store_auction_info();
+
     // save the auction info keyed by its address
     let auction_addr = &deps.api.canonical_address(&env.message.sender)?;
     let mut info_store = PrefixedStorage::new(PREFIX_ACTIVE_INFO, &mut deps.storage);
-    save(&mut info_store, auction_addr.as_slice(), auction)?;
+    save(&mut info_store, auction_addr.as_slice(), &auction)?;
 
     // add the auction address to list of active auctions
     let mut active: HashSet<Vec<u8>> = load(&deps.storage, ACTIVE_KEY)?;
@@ -1152,6 +1155,8 @@ fn display_active_list<S: ReadonlyStorage, A: Api>(
                                     .human_address(&CanonicalAddr::from(addr.as_slice()))?,
                                 label: info.label,
                                 pair,
+                                sell_amount: Uint128(info.sell_amount),
+                                minimum_bid: Uint128(info.minimum_bid),
                             });
                         }
                     }
@@ -1209,6 +1214,7 @@ fn display_addr_closed<S: ReadonlyStorage, A: Api>(
                                     .human_address(&CanonicalAddr::from(addr.as_slice()))?,
                                 label: info.label,
                                 pair,
+                                sell_amount: Uint128(info.sell_amount),
                                 winning_bid: info.winning_bid.map(Uint128),
                                 timestamp: info.timestamp,
                             });
@@ -1270,6 +1276,7 @@ fn display_closed<S: ReadonlyStorage, A: Api>(
                                         .human_address(&CanonicalAddr::from(addr.as_slice()))?,
                                     label: info.label,
                                     pair,
+                                    sell_amount: Uint128(info.sell_amount),
                                     winning_bid: info.winning_bid.map(Uint128),
                                     timestamp: info.timestamp,
                                 });
