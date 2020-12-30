@@ -114,10 +114,12 @@
       "type": "object",
       "required": [
         "address",
+        "bid_decimals",
         "label",
         "minimum_bid",
         "pair",
-        "sell_amount"
+        "sell_amount",
+        "sell_decimals"
       ],
       "properties": {
         "address": {
@@ -127,6 +129,12 @@
               "$ref": "#/definitions/HumanAddr"
             }
           ]
+        },
+        "bid_decimals": {
+          "description": "number of decimal places in minimum_bid",
+          "type": "integer",
+          "format": "uint8",
+          "minimum": 0.0
         },
         "label": {
           "description": "auction label",
@@ -151,6 +159,12 @@
               "$ref": "#/definitions/Uint128"
             }
           ]
+        },
+        "sell_decimals": {
+          "description": "number of decimal places in sell_amount",
+          "type": "integer",
+          "format": "uint8",
+          "minimum": 0.0
         }
       }
     },
@@ -162,6 +176,7 @@
         "label",
         "pair",
         "sell_amount",
+        "sell_decimals",
         "timestamp"
       ],
       "properties": {
@@ -172,6 +187,15 @@
               "$ref": "#/definitions/HumanAddr"
             }
           ]
+        },
+        "bid_decimals": {
+          "description": "number of decimal places in winning_bid",
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint8",
+          "minimum": 0.0
         },
         "label": {
           "description": "auction label",
@@ -188,6 +212,12 @@
               "$ref": "#/definitions/Uint128"
             }
           ]
+        },
+        "sell_decimals": {
+          "description": "number of decimal places in sell_amount",
+          "type": "integer",
+          "format": "uint8",
+          "minimum": 0.0
         },
         "timestamp": {
           "description": "time the auction closed in seconds since epoch 01/01/1970",

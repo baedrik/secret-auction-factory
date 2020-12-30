@@ -18,7 +18,7 @@ use secret_toolkit::{
 use crate::msg::{
     AuctionContractInfo, AuctionInfo, ClosedAuctionInfo, ContractInfo, FilterTypes, HandleAnswer,
     HandleMsg, InitMsg, MyActiveLists, MyClosedLists, QueryAnswer, QueryMsg, RegisterAuctionInfo,
-    ResponseStatus::Success, StoreAuctionInfo, StoreClosedAuctionInfo,
+    ResponseStatus::Success, StoreAuctionInfo, StoreClosedAuctionInfo, TokenSymDec,
 };
 use crate::rand::sha_256;
 use crate::state::{load, may_load, remove, save};
@@ -50,10 +50,10 @@ pub const VERSION_KEY: &[u8] = b"version";
 pub const ACTIVE_KEY: &[u8] = b"active";
 /// storage key for the closed auction list
 pub const CLOSED_KEY: &[u8] = b"closed";
-/// storage key for token symbols
-pub const SYMBOLS_KEY: &[u8] = b"symbols";
-/// storage key for token symbols map
-pub const SYMBOLS_MAP_KEY: &[u8] = b"symbolsmap";
+/// storage key for token symbols and decimals
+pub const SYMDEC_KEY: &[u8] = b"symdec";
+/// storage key for token symbols/decimals map
+pub const SYMDEC_MAP_KEY: &[u8] = b"symdecmap";
 /// storage key for the label of the auction we just instantiated
 pub const PENDING_KEY: &[u8] = b"pending";
 /// pad handle responses and log attributes to blocks of 256 bytes to prevent leaking info based on
@@ -94,8 +94,8 @@ pub fn init<S: Storage, A: Api, Q: Querier>(
     let versions: Vec<AuctionContractInfo> = vec![msg.auction_contract];
     let active: HashSet<Vec<u8>> = HashSet::new();
     let closed: BTreeMap<u64, Vec<u8>> = BTreeMap::new();
-    let symbols: Vec<String> = Vec::new();
-    let symmap: HashMap<String, u16> = HashMap::new();
+    let symdec: Vec<TokenSymDec> = Vec::new();
+    let symdecmap: HashMap<Vec<u8>, u16> = HashMap::new();
     let stopped = false;
 
     save(&mut deps.storage, VERSION_KEY, &versions)?;
@@ -104,8 +104,8 @@ pub fn init<S: Storage, A: Api, Q: Querier>(
     save(&mut deps.storage, PRNG_SEED_KEY, &prng_seed)?;
     save(&mut deps.storage, ACTIVE_KEY, &active)?;
     save(&mut deps.storage, CLOSED_KEY, &closed)?;
-    save(&mut deps.storage, SYMBOLS_KEY, &symbols)?;
-    save(&mut deps.storage, SYMBOLS_MAP_KEY, &symmap)?;
+    save(&mut deps.storage, SYMDEC_KEY, &symdec)?;
+    save(&mut deps.storage, SYMDEC_MAP_KEY, &symdecmap)?;
 
     Ok(InitResponse::default())
 }
@@ -231,7 +231,7 @@ fn try_create_auction<S: Storage, A: Api, Q: Querier>(
         code_hash: env.contract_code_hash,
         address: env.contract.address,
     };
-    let mut symmap: HashMap<String, u16> = load(&deps.storage, SYMBOLS_MAP_KEY)?;
+    let mut symmap: HashMap<Vec<u8>, u16> = load(&deps.storage, SYMDEC_MAP_KEY)?;
     // get sell token info
     let sell_token_info = token_info_query(
         &deps.querier,
@@ -239,7 +239,8 @@ fn try_create_auction<S: Storage, A: Api, Q: Querier>(
         sell_contract.code_hash.clone(),
         sell_contract.address.clone(),
     )?;
-    let may_sell_index = symmap.get_mut(&sell_token_info.symbol).copied();
+    let sell_addr_raw = &deps.api.canonical_address(&sell_contract.address)?;
+    let may_sell_index = symmap.get_mut(&sell_addr_raw.as_slice().to_vec()).copied();
     // get bid token info
     let bid_token_info = token_info_query(
         &deps.querier,
@@ -247,31 +248,40 @@ fn try_create_auction<S: Storage, A: Api, Q: Querier>(
         bid_contract.code_hash.clone(),
         bid_contract.address.clone(),
     )?;
-    let may_bid_index = symmap.get_mut(&bid_token_info.symbol).copied();
+    let bid_addr_raw = &deps.api.canonical_address(&bid_contract.address)?;
+    let may_bid_index = symmap.get_mut(&bid_addr_raw.as_slice().to_vec()).copied();
     let add_symbol = may_sell_index.is_none() || may_bid_index.is_none();
     let sell_index: u16;
     let bid_index: u16;
     // if there is a new symbol add it to the list and get its index
     if add_symbol {
-        let mut symbols: Vec<String> = load(&deps.storage, SYMBOLS_KEY)?;
+        let mut symdecs: Vec<TokenSymDec> = load(&deps.storage, SYMDEC_KEY)?;
         match may_sell_index {
             Some(unwrap) => sell_index = unwrap,
             None => {
-                sell_index = symbols.len() as u16;
-                symmap.insert(sell_token_info.symbol.clone(), sell_index);
-                symbols.push(sell_token_info.symbol)
+                let symdec = TokenSymDec {
+                    symbol: sell_token_info.symbol,
+                    decimals: sell_token_info.decimals,
+                };
+                sell_index = symdecs.len() as u16;
+                symmap.insert(sell_addr_raw.as_slice().to_vec(), sell_index);
+                symdecs.push(symdec)
             }
         }
         match may_bid_index {
             Some(unwrap) => bid_index = unwrap,
             None => {
-                bid_index = symbols.len() as u16;
-                symmap.insert(bid_token_info.symbol.clone(), bid_index);
-                symbols.push(bid_token_info.symbol)
+                let symdec = TokenSymDec {
+                    symbol: bid_token_info.symbol,
+                    decimals: bid_token_info.decimals,
+                };
+                bid_index = symdecs.len() as u16;
+                symmap.insert(bid_addr_raw.as_slice().to_vec(), bid_index);
+                symdecs.push(symdec)
             }
         }
-        save(&mut deps.storage, SYMBOLS_KEY, &symbols)?;
-        save(&mut deps.storage, SYMBOLS_MAP_KEY, &symmap)?;
+        save(&mut deps.storage, SYMDEC_KEY, &symdecs)?;
+        save(&mut deps.storage, SYMDEC_MAP_KEY, &symmap)?;
     // not a new symbol so just get its index from the map
     } else {
         sell_index = may_sell_index.unwrap();
@@ -1140,23 +1150,25 @@ fn display_active_list<S: ReadonlyStorage, A: Api>(
             let mut display_list = Vec::new();
             let read_info = &ReadonlyPrefixedStorage::new(PREFIX_ACTIVE_INFO, storage);
             // get the token symbol strings
-            let symbols: Vec<String> = load(storage, SYMBOLS_KEY)?;
+            let symdecs: Vec<TokenSymDec> = load(storage, SYMDEC_KEY)?;
             for addr in list.iter() {
                 // get this auction's info
                 let load_info: Option<StoreAuctionInfo> = may_load(read_info, addr.as_slice())?;
                 if let Some(info) = load_info {
-                    let may_sell_sym = symbols.get(info.sell_symbol as usize);
-                    if let Some(sell_sym) = may_sell_sym {
-                        let may_bid_sym = symbols.get(info.bid_symbol as usize);
-                        if let Some(bid_sym) = may_bid_sym {
-                            let pair = format!("{}-{}", sell_sym, bid_sym);
+                    let may_sell_symdec = symdecs.get(info.sell_symbol as usize);
+                    if let Some(sell_symdec) = may_sell_symdec {
+                        let may_bid_symdec = symdecs.get(info.bid_symbol as usize);
+                        if let Some(bid_symdec) = may_bid_symdec {
+                            let pair = format!("{}-{}", sell_symdec.symbol, bid_symdec.symbol);
                             display_list.push(AuctionInfo {
                                 address: api
                                     .human_address(&CanonicalAddr::from(addr.as_slice()))?,
                                 label: info.label,
                                 pair,
                                 sell_amount: Uint128(info.sell_amount),
+                                sell_decimals: sell_symdec.decimals,
                                 minimum_bid: Uint128(info.minimum_bid),
+                                bid_decimals: bid_symdec.decimals,
                             });
                         }
                     }
@@ -1197,25 +1209,32 @@ fn display_addr_closed<S: ReadonlyStorage, A: Api>(
             let mut display_list = Vec::new();
             let read_info = &ReadonlyPrefixedStorage::new(PREFIX_CLOSED_INFO, storage);
             // get token symbol strings
-            let symbols: Vec<String> = load(storage, SYMBOLS_KEY)?;
+            let symdecs: Vec<TokenSymDec> = load(storage, SYMDEC_KEY)?;
             // in reverse chronological order
             for addr in list.iter().rev() {
                 // get this auction's info
                 let load_info: Option<StoreClosedAuctionInfo> =
                     may_load(read_info, addr.as_slice())?;
                 if let Some(info) = load_info {
-                    let may_sell_sym = symbols.get(info.sell_symbol as usize);
-                    if let Some(sell_sym) = may_sell_sym {
-                        let may_bid_sym = symbols.get(info.bid_symbol as usize);
-                        if let Some(bid_sym) = may_bid_sym {
-                            let pair = format!("{}-{}", sell_sym, bid_sym);
+                    let may_sell_symdec = symdecs.get(info.sell_symbol as usize);
+                    if let Some(sell_symdec) = may_sell_symdec {
+                        let may_bid_symdec = symdecs.get(info.bid_symbol as usize);
+                        if let Some(bid_symdec) = may_bid_symdec {
+                            let pair = format!("{}-{}", sell_symdec.symbol, bid_symdec.symbol);
+                            let bid_decimals = if info.winning_bid.is_some() {
+                                Some(bid_symdec.decimals)
+                            } else {
+                                None
+                            };
                             display_list.push(ClosedAuctionInfo {
                                 address: api
                                     .human_address(&CanonicalAddr::from(addr.as_slice()))?,
                                 label: info.label,
                                 pair,
                                 sell_amount: Uint128(info.sell_amount),
+                                sell_decimals: sell_symdec.decimals,
                                 winning_bid: info.winning_bid.map(Uint128),
+                                bid_decimals,
                                 timestamp: info.timestamp,
                             });
                         }
@@ -1255,7 +1274,7 @@ fn display_closed<S: ReadonlyStorage, A: Api>(
             let mut display_list = Vec::new();
             let read_info = &ReadonlyPrefixedStorage::new(PREFIX_CLOSED_INFO, storage);
             // get the token symbol strings
-            let symbols: Vec<String> = load(storage, SYMBOLS_KEY)?;
+            let symdecs: Vec<TokenSymDec> = load(storage, SYMDEC_KEY)?;
             // get the timestamp of the latest close
             if let Some(max) = list.keys().next_back() {
                 // start iterating from the last close or before given start point
@@ -1266,18 +1285,25 @@ fn display_closed<S: ReadonlyStorage, A: Api>(
                     let load_info: Option<StoreClosedAuctionInfo> =
                         may_load(read_info, addr.as_slice())?;
                     if let Some(info) = load_info {
-                        let may_sell_sym = symbols.get(info.sell_symbol as usize);
-                        if let Some(sell_sym) = may_sell_sym {
-                            let may_bid_sym = symbols.get(info.bid_symbol as usize);
-                            if let Some(bid_sym) = may_bid_sym {
-                                let pair = format!("{}-{}", sell_sym, bid_sym);
+                        let may_sell_symdec = symdecs.get(info.sell_symbol as usize);
+                        if let Some(sell_symdec) = may_sell_symdec {
+                            let may_bid_symdec = symdecs.get(info.bid_symbol as usize);
+                            if let Some(bid_symdec) = may_bid_symdec {
+                                let pair = format!("{}-{}", sell_symdec.symbol, bid_symdec.symbol);
+                                let bid_decimals = if info.winning_bid.is_some() {
+                                    Some(bid_symdec.decimals)
+                                } else {
+                                    None
+                                };
                                 display_list.push(ClosedAuctionInfo {
                                     address: api
                                         .human_address(&CanonicalAddr::from(addr.as_slice()))?,
                                     label: info.label,
                                     pair,
                                     sell_amount: Uint128(info.sell_amount),
+                                    sell_decimals: sell_symdec.decimals,
                                     winning_bid: info.winning_bid.map(Uint128),
+                                    bid_decimals,
                                     timestamp: info.timestamp,
                                 });
                             }

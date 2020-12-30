@@ -218,6 +218,15 @@ pub struct ContractInfo {
     pub address: HumanAddr,
 }
 
+/// symbol and number of decimal places of a token
+#[derive(Serialize, Deserialize, JsonSchema)]
+pub struct TokenSymDec {
+    /// token symbol
+    pub symbol: String,
+    /// number of decimal places for the token
+    pub decimals: u8,
+}
+
 /// Info needed to instantiate an auction
 #[derive(Serialize, Deserialize, JsonSchema)]
 pub struct AuctionContractInfo {
@@ -238,8 +247,12 @@ pub struct AuctionInfo {
     pub pair: String,
     /// sell amount
     pub sell_amount: Uint128,
+    /// number of decimal places in sell_amount
+    pub sell_decimals: u8,
     /// minimum bid
     pub minimum_bid: Uint128,
+    /// number of decimal places in minimum_bid
+    pub bid_decimals: u8,
 }
 
 /// active auction info for storage
@@ -319,9 +332,14 @@ pub struct ClosedAuctionInfo {
     pub pair: String,
     /// sell amount
     pub sell_amount: Uint128,
+    /// number of decimal places in sell_amount
+    pub sell_decimals: u8,
     /// winning bid
     #[serde(skip_serializing_if = "Option::is_none")]
     pub winning_bid: Option<Uint128>,
+    /// number of decimal places in winning_bid
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub bid_decimals: Option<u8>,
     /// time the auction closed in seconds since epoch 01/01/1970
     pub timestamp: u64,
 }
