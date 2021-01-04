@@ -11,7 +11,7 @@ use cosmwasm_storage::{PrefixedStorage, ReadonlyPrefixedStorage};
 use std::collections::{BTreeMap, HashMap, HashSet};
 
 use secret_toolkit::{
-    snip20::token_info_query,
+    snip20::{send_from_msg, token_info_query},
     utils::{pad_handle_result, pad_query_result, HandleCallback, InitCallback},
 };
 
@@ -141,9 +141,11 @@ pub fn handle<S: Storage, A: Api, Q: Querier>(
             minimum_bid,
             description,
         ),
-        HandleMsg::RegisterAuction { seller, auction } => {
-            try_register_auction(deps, env, &seller, &auction)
-        }
+        HandleMsg::RegisterAuction {
+            seller,
+            auction,
+            sell_contract,
+        } => try_register_auction(deps, env, seller, &auction, sell_contract),
         HandleMsg::RegisterBidder { bidder } => try_reg_bidder(deps, env, bidder),
         HandleMsg::RemoveBidder { bidder } => try_remove_bidder(deps, env, &bidder),
         HandleMsg::CloseAuction {
@@ -336,8 +338,9 @@ fn try_create_auction<S: Storage, A: Api, Q: Querier>(
 fn try_register_auction<S: Storage, A: Api, Q: Querier>(
     deps: &mut Extern<S, A, Q>,
     env: Env,
-    seller: &HumanAddr,
+    seller: HumanAddr,
     reg_auction: &RegisterAuctionInfo,
+    sell_contract: ContractInfo,
 ) -> HandleResult {
     // verify this is the auction we are waiting for
     let load_label: Option<String> = may_load(&deps.storage, PENDING_KEY)?;
@@ -373,8 +376,17 @@ fn try_register_auction<S: Storage, A: Api, Q: Querier>(
     save(&mut seller_store, seller_raw.as_slice(), &my_active)?;
 
     Ok(HandleResponse {
-        messages: vec![],
-        log: vec![log("address", env.message.sender)],
+        messages: vec![send_from_msg(
+            seller,
+            env.message.sender.clone(),
+            reg_auction.sell_amount,
+            None,
+            None,
+            BLOCK_SIZE,
+            sell_contract.code_hash,
+            sell_contract.address,
+        )?],
+        log: vec![log("auction_address", env.message.sender)],
         data: None,
     })
 }

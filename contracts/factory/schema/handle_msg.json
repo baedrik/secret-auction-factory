@@ -79,6 +79,7 @@
           "type": "object",
           "required": [
             "auction",
+            "sell_contract",
             "seller"
           ],
           "properties": {
@@ -87,6 +88,14 @@
               "allOf": [
                 {
                   "$ref": "#/definitions/RegisterAuctionInfo"
+                }
+              ]
+            },
+            "sell_contract": {
+              "description": "sell token contract info",
+              "allOf": [
+                {
+                  "$ref": "#/definitions/ContractInfo"
                 }
               ]
             },

@@ -13,7 +13,7 @@ use serde_json_wasm as serde_json;
 use secret_toolkit::utils::{pad_handle_result, pad_query_result, HandleCallback};
 
 use crate::msg::{
-    HandleAnswer, HandleMsg, InitMsg, QueryAnswer, QueryMsg, ResponseStatus,
+    ContractInfo, HandleAnswer, HandleMsg, InitMsg, QueryAnswer, QueryMsg, ResponseStatus,
     ResponseStatus::{Failure, Success},
     Token,
 };
@@ -58,6 +58,8 @@ pub enum FactoryHandleMsg {
         seller: HumanAddr,
         /// this auction's info
         auction: FactoryAuctionInfo,
+        /// sell token contract info
+        sell_contract: ContractInfo,
     },
     /// registers the closure of this auction with the factory
     CloseAuction {
@@ -106,7 +108,7 @@ pub fn init<S: Storage, A: Api, Q: Querier>(
         factory: msg.factory.clone(),
         auction_addr: env.contract.address,
         seller: msg.seller.clone(),
-        sell_contract: msg.sell_contract,
+        sell_contract: msg.sell_contract.clone(),
         bid_contract: msg.bid_contract,
         sell_amount: msg.sell_amount.u128(),
         minimum_bid: msg.minimum_bid.u128(),
@@ -132,6 +134,7 @@ pub fn init<S: Storage, A: Api, Q: Querier>(
     let reg_auction_msg = FactoryHandleMsg::RegisterAuction {
         seller: msg.seller,
         auction,
+        sell_contract: msg.sell_contract,
     };
     // perform factory register callback
     let cosmos_msg =

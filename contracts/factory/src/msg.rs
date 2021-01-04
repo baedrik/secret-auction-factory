@@ -44,6 +44,8 @@ pub enum HandleMsg {
         seller: HumanAddr,
         /// auction information needed by the factory
         auction: RegisterAuctionInfo,
+        /// sell token contract info
+        sell_contract: ContractInfo,
     },
 
     /// CloseAuction tells the factory that the auction closed and provides the winning bid if appropriate

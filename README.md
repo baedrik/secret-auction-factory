@@ -4,15 +4,21 @@ This is an update to the [sealed-bid auction](https://github.com/baedrik/SCRT-se
 Although the original auction contract will no longer be updated, the repo will remain available so that people may use it as an example for writing secret contracts.  The original repo includes an in depth [WALKTHROUGH](https://github.com/baedrik/SCRT-sealed-bid-auction/blob/master/WALKTHROUGH.md) as well as an explanation of [CALLING_OTHER_CONTRACTS](https://github.com/baedrik/SCRT-sealed-bid-auction/blob/master/CALLING_OTHER_CONTRACTS.md).
 
 ## Creating a New Auction
-You can create a new auction using secretcli with:
+First you must give the factory an allowance to consign the tokens for sale to the new auction's escrow:
 ```sh
-secretcli tx compute execute --label *factory_contract_label* '{"create_auction":{"label":"*your_auction_name*","sell_contract":{"code_hash":"*sale_tokens_code_hash*","address":"*sale_tokens_contract_address*"},"bid_contract":{"code_hash":"*bid_tokens_code_hash*","address":"*bid_tokens_contract_address*"},"sell_amount":"*amount_being_sold_in_smallest_denomination_of_sale_token*","minimum_bid":"*minimum_accepted_bid_in_smallest_denomination_of_bid_token*","description":"*optional_text_description*"}}' --from *your_key_alias_or_addr* --gas 400000 -y
+secretcli tx compute execute *sale_tokens_contract_address* '{"increase_allowance":{"spender":"*factory_contract_address*","amount":"*amount_being_sold_in_smallest_denomination_of_sale_token*"}}' --from *your_key_alias_or_addr* --gas 150000 -y
+```
+Then you can create the auction with:
+```sh
+secretcli tx compute execute --label *factory_contract_label* '{"create_auction":{"label":"*your_auction_name*","sell_contract":{"code_hash":"*sale_tokens_code_hash*","address":"*sale_tokens_contract_address*"},"bid_contract":{"code_hash":"*bid_tokens_code_hash*","address":"*bid_tokens_contract_address*"},"sell_amount":"*amount_being_sold_in_smallest_denomination_of_sale_token*","minimum_bid":"*minimum_accepted_bid_in_smallest_denomination_of_bid_token*","description":"*optional_text_description*"}}' --from *your_key_alias_or_addr* --gas 600000 -y
 ```
 You can find a contract's code hash with
 ```sh
 secretcli q compute contract-hash *contract_address*
 ```
 Copy it without the 0x prefix and surround it with quotes in the instantiate command.
+
+When the factory creates the new auction it will send the tokens you are putting up for sale to the auction's escrow.  If you did not give the factory sufficient allowance, or if your token balance is less than the sale amount, the auction will not be created.
 
 The description field is optional.  It will accept a free-form text string (best to avoid using double-quotes).  One possible use would be to list the approximate date that you plan to finalize the auction.  In a sealed bid auction, a pre-defined end date is not necessary.  It is necessary in an open ascending bid auction because bidders need to know when the auction will close so that they can monitor if they are winning and bid higher if they are not.  Because in a sealed bid auction, no one knows if they are the highest bidder until after the auction ends, the bidder has no further actions after placing his bid.  For this reason, the auction owner can finalize the auction at any time.  If at any point a bidder no longer wants to wait for the owner to finalize the auction, he can retract his bid and have his bid tokens returned.  For this reason, it might benefit the auction owner to give an approximate end date in the description so that his highest bid doesn't get retracted before he decides to close the auction.  If user consensus would like to have an end date implemented, in which no bids will be accepted after such time, the owner can not finalize the auction before the end date, and afterwards, anyone can close the auction, it can be included.
 
@@ -30,13 +36,6 @@ or you can set the viewing key with
 secretcli tx compute execute --label *factory_contract_label* '{"set_viewing_key":{"key":"*The viewing key you want*","padding":"Optional string used to pad the message length so it does not leak the length of the key"}}' --from *your_key_alias_or_addr* --gas 200000 -y
 ```
 A viewing key allows you to query the factory contract for a list of only the auctions you have interacted with.  It also allows you to view your bid information by querying the individual auctions.  It is recommended to use `create_viewing_key` to set your viewing key instead of using `set_viewing_key` because `create_viewing_key` will generate a complex key, whereas `set_viewing_key` will just accept whatever key it is given.  `set_viewing_key` is provided if a UI would like to generate the viewing key itself.  If you are developing a UI and are using `set_viewing_key`, also use the `padding` field so that the length of the message does not leak information about the length of the viewing key.
-
-## Consigning Tokens To Be Sold
-To consign the tokens to be sold, the auction owner should Send the tokens to the individual auction contract address with
-```sh
-secretcli tx compute execute *sale_tokens_contract_address* '{"send": {"recipient": "*auction_contract_address*", "amount": "*amount_being_sold_in_smallest_denomination_of_sell_token*"}}' --from *your_key_alias_or_addr* --gas 500000 -y
-```
-It will only accept consignment from the address that created the auction.  Any other address trying to consign tokens will have them immediately returned.  You can consign an amount smaller than the total amount to be sold, but the auction will not be displayed as fully consigned until you have sent the full amount.  You may consign the total amount in multiple Send transactions if desired, and any tokens you send in excess of the sale amount will be returned to you.  If the auction has been closed, any tokens you send for consignment will be immediately returned, and the auction will remain closed.
 
 ## Placing Bids
 To place a bid, the bidder should Send the tokens to the individual auction contract address with
