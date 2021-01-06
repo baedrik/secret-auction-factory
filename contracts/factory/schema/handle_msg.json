@@ -14,6 +14,7 @@
           "type": "object",
           "required": [
             "bid_contract",
+            "ends_at",
             "label",
             "minimum_bid",
             "sell_amount",
@@ -35,6 +36,12 @@
                 "string",
                 "null"
               ]
+            },
+            "ends_at": {
+              "description": "timestamp after which anyone may close the auction. Timestamp is in seconds since epoch 01/01/1970",
+              "type": "integer",
+              "format": "uint64",
+              "minimum": 0.0
             },
             "label": {
               "description": "String label for the auction",

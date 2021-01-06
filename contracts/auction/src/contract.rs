@@ -109,11 +109,14 @@ pub fn init<S: Storage, A: Api, Q: Querier>(
         auction_addr: env.contract.address,
         seller: msg.seller.clone(),
         sell_contract: msg.sell_contract.clone(),
+        sell_decimals: msg.sell_decimals,
         bid_contract: msg.bid_contract,
+        bid_decimals: msg.bid_decimals,
         sell_amount: msg.sell_amount.u128(),
         minimum_bid: msg.minimum_bid.u128(),
         currently_consigned: 0,
         bidders: HashSet::new(),
+        ends_at: msg.ends_at,
         is_completed: false,
         tokens_consigned: false,
         description: msg.description,
@@ -241,17 +244,7 @@ fn try_receive<S: Storage, A: Api, Q: Querier>(
             "Address: {} is not a token in this auction",
             env.message.sender
         );
-        let resp = serde_json::to_string(&HandleAnswer::Status {
-            status: Failure,
-            message,
-        })
-        .unwrap();
-
-        Ok(HandleResponse {
-            messages: vec![],
-            log: vec![log("response", resp)],
-            data: None,
-        })
+        Err(StdError::generic_err(message))
     }
 }
 
@@ -273,64 +266,21 @@ fn try_consign<S: Storage, A: Api, Q: Querier>(
 ) -> HandleResult {
     // if not the auction owner, send the tokens back
     if owner != state.seller {
-        let message = String::from(
+        return Err(StdError::generic_err(
             "Only auction creator can consign tokens for sale.  Your tokens have been returned",
-        );
-
-        let resp = serde_json::to_string(&HandleAnswer::Consign {
-            status: Failure,
-            message,
-            amount_consigned: None,
-            amount_needed: None,
-            amount_returned: Some(amount),
-        })
-        .unwrap();
-
-        return Ok(HandleResponse {
-            messages: vec![state.sell_contract.transfer_msg(owner, amount)?],
-            log: vec![log("response", resp)],
-            data: None,
-        });
+        ));
     }
     // if auction is over, send the tokens back
     if state.is_completed {
-        let message = String::from("Auction has ended. Your tokens have been returned");
-
-        let resp = serde_json::to_string(&HandleAnswer::Consign {
-            status: Failure,
-            message,
-            amount_consigned: None,
-            amount_needed: None,
-            amount_returned: Some(amount),
-        })
-        .unwrap();
-
-        return Ok(HandleResponse {
-            messages: vec![state.sell_contract.transfer_msg(owner, amount)?],
-            log: vec![log("response", resp)],
-            data: None,
-        });
+        return Err(StdError::generic_err(
+            "Auction has ended. Your tokens have been returned",
+        ));
     }
     // if tokens to be sold have already been consigned, return these tokens
     if state.tokens_consigned {
-        let message = String::from(
+        return Err(StdError::generic_err(
             "Tokens to be sold have already been consigned. Your tokens have been returned",
-        );
-
-        let resp = serde_json::to_string(&HandleAnswer::Consign {
-            status: Failure,
-            message,
-            amount_consigned: Some(Uint128(state.currently_consigned)),
-            amount_needed: None,
-            amount_returned: Some(amount),
-        })
-        .unwrap();
-
-        return Ok(HandleResponse {
-            messages: vec![state.sell_contract.transfer_msg(owner, amount)?],
-            log: vec![log("response", resp)],
-            data: None,
-        });
+        ));
     }
 
     let consign_total = state.currently_consigned + amount.u128();
@@ -367,9 +317,10 @@ fn try_consign<S: Storage, A: Api, Q: Querier>(
     let resp = serde_json::to_string(&HandleAnswer::Consign {
         status,
         message: log_msg,
-        amount_consigned: Some(Uint128(state.currently_consigned)),
+        amount_consigned: Uint128(state.currently_consigned),
         amount_needed: needed,
         amount_returned: excess,
+        sell_decimals: state.sell_decimals,
     })
     .unwrap();
 
@@ -400,43 +351,13 @@ fn try_bid<S: Storage, A: Api, Q: Querier>(
 ) -> HandleResult {
     // if auction is over, send the tokens back
     if state.is_completed {
-        let message = String::from("Auction has ended. Bid tokens have been returned");
-
-        let resp = serde_json::to_string(&HandleAnswer::Bid {
-            status: Failure,
-            message,
-            previous_bid: None,
-            minimum_bid: None,
-            amount_bid: None,
-            amount_returned: Some(amount),
-        })
-        .unwrap();
-
-        return Ok(HandleResponse {
-            messages: vec![state.bid_contract.transfer_msg(bidder, amount)?],
-            log: vec![log("response", resp)],
-            data: None,
-        });
+        return Err(StdError::generic_err(
+            "Auction has ended. Bid tokens have been returned",
+        ));
     }
     // don't accept a 0 bid
     if amount == Uint128(0) {
-        let message = String::from("Bid must be greater than 0");
-
-        let resp = serde_json::to_string(&HandleAnswer::Bid {
-            status: Failure,
-            message,
-            previous_bid: None,
-            minimum_bid: None,
-            amount_bid: None,
-            amount_returned: None,
-        })
-        .unwrap();
-
-        return Ok(HandleResponse {
-            messages: vec![],
-            log: vec![log("response", resp)],
-            data: None,
-        });
+        return Err(StdError::generic_err("Bid must be greater than 0"));
     }
     // if bid is less than the minimum accepted bid, send the tokens back
     if amount.u128() < state.minimum_bid {
@@ -450,6 +371,7 @@ fn try_bid<S: Storage, A: Api, Q: Querier>(
             minimum_bid: Some(Uint128(state.minimum_bid)),
             amount_bid: None,
             amount_returned: Some(amount),
+            bid_decimals: state.bid_decimals,
         })
         .unwrap();
 
@@ -481,6 +403,7 @@ fn try_bid<S: Storage, A: Api, Q: Querier>(
                     minimum_bid: None,
                     amount_bid: None,
                     amount_returned: Some(amount),
+                    bid_decimals: state.bid_decimals,
                 })
                 .unwrap();
 
@@ -530,6 +453,7 @@ fn try_bid<S: Storage, A: Api, Q: Querier>(
         minimum_bid: None,
         amount_bid: Some(amount),
         amount_returned: return_amount,
+        bid_decimals: state.bid_decimals,
     })
     .unwrap();
 
@@ -559,6 +483,7 @@ fn try_retract<S: Storage, A: Api, Q: Querier>(
     let sent: Option<Uint128>;
     let mut log_msg = String::new();
     let status: ResponseStatus;
+    let bid_decimals = state.bid_decimals;
     // if there was a active bid from this address, remove the bid and return tokens
     if state.bidders.contains(&bidder_raw.as_slice().to_vec()) {
         let bid: Option<Bid> = may_load(&deps.storage, bidder_raw.as_slice())?;
@@ -601,6 +526,7 @@ fn try_retract<S: Storage, A: Api, Q: Querier>(
             status,
             message: log_msg,
             amount_returned: sent,
+            bid_decimals: sent.map(|_a| bid_decimals),
         })?),
     })
 }
@@ -625,50 +551,33 @@ fn try_finalize<S: Storage, A: Api, Q: Querier>(
 
     // can only do a return_all if the auction is closed
     if return_all && !state.is_completed {
-        return Ok(HandleResponse {
-            messages: vec![],
-            log: vec![],
-            data: Some(to_binary(&HandleAnswer::CloseAuction {
-                status: Failure,
-                message: String::from(
-                    "return_all can only be executed after the auction has ended",
-                ),
-                winning_bid: None,
-                amount_returned: None,
-            })?),
-        });
+        return Err(StdError::generic_err(
+            "return_all can only be executed after the auction has ended",
+        ));
     }
-    // if not the auction owner, can't finalize, but you can return_all
-    if !return_all && env.message.sender != state.seller {
-        return Ok(HandleResponse {
-            messages: vec![],
-            log: vec![],
-            data: Some(to_binary(&HandleAnswer::CloseAuction {
-                status: Failure,
-                message: String::from("Only auction creator can finalize the sale"),
-                winning_bid: None,
-                amount_returned: None,
-            })?),
-        });
+    let is_seller = env.message.sender == state.seller;
+    // if not the auction owner, can't finalize before the closing time, but you can return_all
+    if !return_all && !is_seller && (env.block.time < state.ends_at) {
+        return Err(StdError::generic_err(
+            "Only auction creator can finalize the sale before the closing time",
+        ));
     }
-    // if there are no active bids, and owner only wants to close if bids
+    // if there are no active bids, and only want to close if bids
     if !state.is_completed && only_if_bids && state.bidders.is_empty() {
-        return Ok(HandleResponse {
-            messages: vec![],
-            log: vec![],
-            data: Some(to_binary(&HandleAnswer::CloseAuction {
-                status: Failure,
-                message: String::from("Did not close because there are no active bids"),
-                winning_bid: None,
-                amount_returned: None,
-            })?),
-        });
+        return Err(StdError::generic_err(
+            "Did not close because there are no active bids",
+        ));
     }
     let mut cos_msg = Vec::new();
     let mut update_state = false;
     let mut winning_amount: Option<Uint128> = None;
+    let mut bid_decimals: Option<u8> = None;
     let mut winner: Option<HumanAddr> = None;
-    let mut amount_returned: Option<Uint128> = None;
+    let mut sell_tokens_received: Option<Uint128> = None;
+    let mut sell_decimals: Option<u8> = None;
+    let mut bid_tokens_received: Option<Uint128> = None;
+    let mut is_winner = false;
+    let mut is_loser = false;
 
     let no_bids = state.bidders.is_empty();
     // if there were bids
@@ -709,9 +618,17 @@ fn try_finalize<S: Storage, A: Api, Q: Querier>(
                         .sell_contract
                         .transfer_msg(human_winner.clone(), Uint128(state.sell_amount))?,
                 );
+                winning_amount = Some(Uint128(winning_bid.bid.amount));
+                if is_seller {
+                    bid_tokens_received = winning_amount;
+                }
+                if human_winner == env.message.sender {
+                    is_winner = true;
+                    sell_tokens_received = Some(Uint128(state.sell_amount));
+                    sell_decimals = Some(state.sell_decimals);
+                }
                 state.currently_consigned = 0;
                 update_state = true;
-                winning_amount = Some(Uint128(winning_bid.bid.amount));
                 winner = Some(human_winner);
                 state.winning_bid = winning_bid.bid.amount;
                 remove(&mut deps.storage, &winning_bid.bidder.as_slice());
@@ -722,10 +639,20 @@ fn try_finalize<S: Storage, A: Api, Q: Querier>(
         }
         // loops through all remaining bids to return them to the bidders
         for losing_bid in &bid_list {
-            cos_msg.push(state.bid_contract.transfer_msg(
-                deps.api.human_address(&losing_bid.bidder)?,
-                Uint128(losing_bid.bid.amount),
-            )?);
+            let human_loser = deps.api.human_address(&losing_bid.bidder)?;
+            if human_loser == env.message.sender {
+                is_loser = true;
+                // if the seller also placed a losing bid, add them
+                bid_tokens_received = Some(
+                    bid_tokens_received.unwrap_or(Uint128(0)) + Uint128(losing_bid.bid.amount),
+                );
+                bid_decimals = Some(state.bid_decimals);
+            }
+            cos_msg.push(
+                state
+                    .bid_contract
+                    .transfer_msg(human_loser, Uint128(losing_bid.bid.amount))?,
+            );
             remove(&mut deps.storage, &losing_bid.bidder.as_slice());
             update_state = true;
             state.bidders.remove(&losing_bid.bidder.as_slice().to_vec());
@@ -739,8 +666,9 @@ fn try_finalize<S: Storage, A: Api, Q: Querier>(
                 .sell_contract
                 .transfer_msg(state.seller.clone(), Uint128(state.currently_consigned))?,
         );
-        if !return_all {
-            amount_returned = Some(Uint128(state.currently_consigned));
+        if is_seller {
+            sell_tokens_received = Some(Uint128(state.currently_consigned));
+            sell_decimals = Some(state.sell_decimals);
         }
         state.currently_consigned = 0;
         update_state = true;
@@ -767,24 +695,31 @@ fn try_finalize<S: Storage, A: Api, Q: Querier>(
     }
 
     let log_msg = if winning_amount.is_some() {
-        "Sale finalized.  You have been sent the winning bid tokens".to_string()
-    } else if amount_returned.is_some() {
-        let cause = if !state.tokens_consigned {
-            " because you did not consign the full sale amount"
-        } else if no_bids {
-            " because there were no active bids"
+        bid_decimals = Some(state.bid_decimals);
+        let seller_msg = if is_seller {
+            ".  You have been sent the winning bid"
         } else {
             ""
         };
-        format!(
-            "Auction closed.  You have been returned the consigned tokens{}",
-            cause
-        )
+        let bidder_msg = if is_winner {
+            ".  Your bid won! You have been sent the sale token(s)"
+        } else if is_loser {
+            ".  Your bid did not win and has been returned"
+        } else {
+            ""
+        };
+        format!("Sale has been finalized{}{}", seller_msg, bidder_msg)
     } else if return_all {
         "Outstanding funds have been returned".to_string()
     } else {
-        "Auction has been closed".to_string()
+        let consign_msg = if no_bids && sell_tokens_received.is_some() {
+            ".  Consigned tokens have been returned because there were no active bids"
+        } else {
+            ""
+        };
+        format!("Auction has been closed{}", consign_msg)
     };
+
     Ok(HandleResponse {
         messages: cos_msg,
         log: vec![],
@@ -792,7 +727,10 @@ fn try_finalize<S: Storage, A: Api, Q: Querier>(
             status: Success,
             message: log_msg,
             winning_bid: winning_amount,
-            amount_returned,
+            bid_decimals,
+            sell_tokens_received,
+            sell_decimals,
+            bid_tokens_received,
         })?),
     })
 }
@@ -852,6 +790,11 @@ fn try_query_info<S: Storage, A: Api, Q: Querier>(deps: &Extern<S, A, Q>) -> Que
         Some(Uint128(state.winning_bid))
     };
 
+    let ends_at = format!(
+        "{} UTC",
+        NaiveDateTime::from_timestamp(state.ends_at as i64, 0).format("%Y-%m-%d %H:%M:%S")
+    );
+
     to_binary(&QueryAnswer::AuctionInfo {
         sell_token: Token {
             contract_address: state.sell_contract.address,
@@ -865,6 +808,7 @@ fn try_query_info<S: Storage, A: Api, Q: Querier>(deps: &Extern<S, A, Q>) -> Que
         minimum_bid: Uint128(state.minimum_bid),
         description: state.description,
         auction_address: state.auction_addr,
+        ends_at,
         status,
         winning_bid,
     })
@@ -919,6 +863,7 @@ fn try_view_bid<S: Storage, A: Api, Q: Querier>(
                 status,
                 message,
                 amount_bid,
+                bid_decimals: amount_bid.map(|_a| state.bid_decimals),
             });
         }
     } else {
@@ -930,4 +875,1585 @@ fn try_view_bid<S: Storage, A: Api, Q: Querier>(
     to_binary(&QueryAnswer::ViewingKeyError {
         error: "Wrong viewing key for this address or viewing key not set".to_string(),
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::msg::ContractInfo;
+    use cosmwasm_std::{from_binary, testing::*, BlockInfo, MessageInfo, QueryResponse, StdResult};
+    use std::any::Any;
+
+    fn init_helper() -> (
+        StdResult<InitResponse>,
+        Extern<MockStorage, MockApi, MockQuerier>,
+    ) {
+        let mut deps = mock_dependencies(20, &[]);
+        let env = mock_env("factory", &[]);
+
+        let factory = ContractInfo {
+            code_hash: "factoryhash".to_string(),
+            address: HumanAddr("factoryaddr".to_string()),
+        };
+        let sell_contract = ContractInfo {
+            code_hash: "sellhash".to_string(),
+            address: HumanAddr("selladdr".to_string()),
+        };
+        let bid_contract = ContractInfo {
+            code_hash: "bidhash".to_string(),
+            address: HumanAddr("bidaddr".to_string()),
+        };
+        let init_msg = InitMsg {
+            factory,
+            version: 0,
+            label: "auction".to_string(),
+            sell_symbol: 0,
+            sell_decimals: 4,
+            bid_symbol: 1,
+            bid_decimals: 8,
+            seller: HumanAddr("alice".to_string()),
+            sell_contract,
+            bid_contract,
+            sell_amount: Uint128(10),
+            minimum_bid: Uint128(10),
+            ends_at: 1000,
+            description: None,
+        };
+        (init(&mut deps, env, init_msg), deps)
+    }
+
+    //    fn extract_error_msg<T: Any>(error: StdResult<T>) -> String {
+    //        match error {
+    //            Ok(_response) => "These are not the errors you are looking for".to_string(),
+    //            Err(err) => match err {
+    //                StdError::GenericErr { msg, .. } => msg,
+    //                _ => panic!("Unexpected result from init"),
+    //            },
+    //        }
+    //    }
+    fn extract_error_msg<T: Any>(error: StdResult<T>) -> String {
+        match error {
+            Ok(response) => {
+                let bin_err = (&response as &dyn Any)
+                    .downcast_ref::<QueryResponse>()
+                    .expect("An error was expected, but no error could be extracted");
+                match from_binary(bin_err).unwrap() {
+                    QueryAnswer::ViewingKeyError { error } => error,
+                    _ => panic!("Unexpected query answer"),
+                }
+            }
+            Err(err) => match err {
+                StdError::GenericErr { msg, .. } => msg,
+                _ => panic!("Unexpected result from init"),
+            },
+        }
+    }
+
+    fn extract_log(resp: StdResult<HandleResponse>) -> String {
+        match resp {
+            Ok(response) => response.log[0].value.clone(),
+            Err(_err) => "These are not the logs you are looking for".to_string(),
+        }
+    }
+
+    fn extract_msg(resp: &StdResult<HandleResponse>) -> String {
+        let handle_answer: HandleAnswer =
+            from_binary(&resp.as_ref().unwrap().data.as_ref().unwrap()).unwrap();
+        match handle_answer {
+            HandleAnswer::Bid { message, .. } => message.clone(),
+            HandleAnswer::Consign { message, .. } => message.clone(),
+            HandleAnswer::CloseAuction { message, .. } => message.clone(),
+            HandleAnswer::RetractBid { message, .. } => message.clone(),
+        }
+    }
+
+    fn extract_finalize_fields(
+        resp: &StdResult<HandleResponse>,
+    ) -> (
+        String,
+        Option<Uint128>,
+        Option<u8>,
+        Option<Uint128>,
+        Option<u8>,
+        Option<Uint128>,
+    ) {
+        let handle_answer: HandleAnswer =
+            from_binary(&resp.as_ref().unwrap().data.as_ref().unwrap()).unwrap();
+        match handle_answer {
+            HandleAnswer::CloseAuction {
+                message,
+                winning_bid,
+                bid_decimals,
+                sell_tokens_received,
+                sell_decimals,
+                bid_tokens_received,
+                ..
+            } => (
+                message,
+                winning_bid,
+                bid_decimals,
+                sell_tokens_received,
+                sell_decimals,
+                bid_tokens_received,
+            ),
+            _ => panic!("Unexpected HandleAnswer"),
+        }
+    }
+
+    fn extract_amount_returned(resp: &StdResult<HandleResponse>) -> (Option<Uint128>, Option<u8>) {
+        let handle_answer: HandleAnswer =
+            from_binary(&resp.as_ref().unwrap().data.as_ref().unwrap()).unwrap();
+        match handle_answer {
+            HandleAnswer::RetractBid {
+                amount_returned,
+                bid_decimals,
+                ..
+            } => (amount_returned, bid_decimals),
+            _ => panic!("Unexpected HandleAnswer"),
+        }
+    }
+
+    #[test]
+    fn test_init_sanity() {
+        let (init_result, deps) = init_helper();
+        assert!(
+            init_result.is_ok(),
+            "Init failed: {}",
+            init_result.err().unwrap()
+        );
+        let state: State = load(&deps.storage, CONFIG_KEY).unwrap();
+        let factory = ContractInfo {
+            code_hash: "factoryhash".to_string(),
+            address: HumanAddr("factoryaddr".to_string()),
+        };
+        let sell_contract = ContractInfo {
+            code_hash: "sellhash".to_string(),
+            address: HumanAddr("selladdr".to_string()),
+        };
+        let bid_contract = ContractInfo {
+            code_hash: "bidhash".to_string(),
+            address: HumanAddr("bidaddr".to_string()),
+        };
+
+        assert_eq!(factory, state.factory);
+        assert_eq!(HumanAddr("alice".to_string()), state.seller);
+        assert_eq!(sell_contract, state.sell_contract);
+        assert_eq!(4, state.sell_decimals);
+        assert_eq!(bid_contract, state.bid_contract);
+        assert_eq!(8, state.bid_decimals);
+        assert_eq!(10, state.sell_amount);
+        assert_eq!(10, state.minimum_bid);
+        assert_eq!(0, state.currently_consigned);
+        assert_eq!(HashSet::new(), state.bidders);
+        assert_eq!(false, state.is_completed);
+        assert_eq!(false, state.tokens_consigned);
+        assert_eq!(1000, state.ends_at);
+        assert_eq!(None, state.description);
+        assert_eq!(0, state.winning_bid);
+    }
+
+    #[test]
+    fn test_consign() {
+        let (init_result, mut deps) = init_helper();
+        assert!(
+            init_result.is_ok(),
+            "Init failed: {}",
+            init_result.err().unwrap()
+        );
+
+        // try to consign if not seller
+        let handle_msg = HandleMsg::Receive {
+            sender: HumanAddr("blah".to_string()),
+            from: HumanAddr("bob".to_string()),
+            amount: Uint128(2500),
+            msg: None,
+        };
+        let handle_result = handle(&mut deps, mock_env("selladdr", &[]), handle_msg);
+        let error = extract_error_msg(handle_result);
+        assert!(error.contains("Only auction creator can consign tokens for sale"));
+
+        // try already consigned
+        let handle_msg = HandleMsg::Receive {
+            sender: HumanAddr("blah".to_string()),
+            from: HumanAddr("alice".to_string()),
+            amount: Uint128(2500),
+            msg: None,
+        };
+        let _handle_result = handle(&mut deps, mock_env("selladdr", &[]), handle_msg);
+        let handle_msg = HandleMsg::Receive {
+            sender: HumanAddr("blah".to_string()),
+            from: HumanAddr("alice".to_string()),
+            amount: Uint128(2500),
+            msg: None,
+        };
+        let handle_result = handle(&mut deps, mock_env("selladdr", &[]), handle_msg);
+        let error = extract_error_msg(handle_result);
+        assert!(error.contains("Tokens to be sold have already been consigned."));
+
+        // try to consign after closing
+        let handle_msg = HandleMsg::Finalize {
+            only_if_bids: false,
+        };
+        let _used = handle(&mut deps, mock_env("alice", &[]), handle_msg);
+        let handle_msg = HandleMsg::Receive {
+            sender: HumanAddr("blah".to_string()),
+            from: HumanAddr("alice".to_string()),
+            amount: Uint128(2500),
+            msg: None,
+        };
+
+        let handle_result = handle(&mut deps, mock_env("selladdr", &[]), handle_msg);
+        let error = extract_error_msg(handle_result);
+        assert!(error.contains("Auction has ended. Your tokens have been returned"));
+
+        // try consign too little
+        let (init_result, mut deps) = init_helper();
+        assert!(
+            init_result.is_ok(),
+            "Init failed: {}",
+            init_result.err().unwrap()
+        );
+        let handle_msg = HandleMsg::Receive {
+            sender: HumanAddr("blah".to_string()),
+            from: HumanAddr("alice".to_string()),
+            amount: Uint128(2),
+            msg: None,
+        };
+        let handle_result = handle(&mut deps, mock_env("selladdr", &[]), handle_msg);
+        let log = extract_log(handle_result);
+        assert!(log.contains("not consigned the full amount"));
+        assert!(log.contains("\"amount_needed\":\"8\""));
+        assert!(log.contains("\"sell_decimals\":4"));
+        let state: State = load(&deps.storage, CONFIG_KEY).unwrap();
+        assert_eq!(false, state.tokens_consigned);
+
+        // try consign too much
+        let handle_msg = HandleMsg::Receive {
+            sender: HumanAddr("blah".to_string()),
+            from: HumanAddr("alice".to_string()),
+            amount: Uint128(20),
+            msg: None,
+        };
+        let handle_result = handle(&mut deps, mock_env("selladdr", &[]), handle_msg);
+        let log = extract_log(handle_result);
+        assert!(log.contains("Excess tokens have been returned"));
+        assert!(log.contains("\"amount_returned\":\"12\""));
+        assert!(log.contains("\"sell_decimals\":4"));
+        let state: State = load(&deps.storage, CONFIG_KEY).unwrap();
+        assert!(state.tokens_consigned);
+    }
+
+    #[test]
+    fn test_bid() {
+        let (init_result, mut deps) = init_helper();
+        assert!(
+            init_result.is_ok(),
+            "Init failed: {}",
+            init_result.err().unwrap()
+        );
+
+        // try bid 0
+        let handle_msg = HandleMsg::Receive {
+            sender: HumanAddr("blah".to_string()),
+            from: HumanAddr("bob".to_string()),
+            amount: Uint128(0),
+            msg: None,
+        };
+        let handle_result = handle(&mut deps, mock_env("bidaddr", &[]), handle_msg);
+        let error = extract_error_msg(handle_result);
+        assert!(error.contains("Bid must be greater than 0"));
+
+        // try bid less than minimum
+        let (init_result, mut deps) = init_helper();
+        assert!(
+            init_result.is_ok(),
+            "Init failed: {}",
+            init_result.err().unwrap()
+        );
+        let handle_msg = HandleMsg::Receive {
+            sender: HumanAddr("blah".to_string()),
+            from: HumanAddr("bob".to_string()),
+            amount: Uint128(9),
+            msg: None,
+        };
+        let handle_result = handle(&mut deps, mock_env("bidaddr", &[]), handle_msg);
+        let log = extract_log(handle_result);
+        assert!(log.contains("Bid was less than minimum allowed"));
+        assert!(log.contains("\"minimum_bid\":\"10\""));
+        assert!(log.contains("\"amount_returned\":\"9\""));
+        assert!(log.contains("\"bid_decimals\":8"));
+
+        let state: State = load(&deps.storage, CONFIG_KEY).unwrap();
+        assert_eq!(state.bidders.len(), 0);
+
+        // sanity check
+        let handle_msg = HandleMsg::Receive {
+            sender: HumanAddr("blah".to_string()),
+            from: HumanAddr("bob".to_string()),
+            amount: Uint128(100),
+            msg: None,
+        };
+        let handle_result = handle(&mut deps, mock_env("bidaddr", &[]), handle_msg);
+        let log = extract_log(handle_result);
+        assert!(log.contains("\"amount_bid\":\"100\""));
+        assert!(log.contains("\"bid_decimals\":8"));
+        let state: State = load(&deps.storage, CONFIG_KEY).unwrap();
+        assert_eq!(state.bidders.len(), 1);
+        let bid: Bid = load(
+            &deps.storage,
+            deps.api
+                .canonical_address(&HumanAddr("bob".to_string()))
+                .unwrap()
+                .as_slice(),
+        )
+        .unwrap();
+        assert_eq!(bid.amount, 100);
+
+        // test bid less than previous bid
+        let handle_msg = HandleMsg::Receive {
+            sender: HumanAddr("blah".to_string()),
+            from: HumanAddr("bob".to_string()),
+            amount: Uint128(25),
+            msg: None,
+        };
+        let handle_result = handle(&mut deps, mock_env("bidaddr", &[]), handle_msg);
+        let log = extract_log(handle_result);
+        assert!(log.contains("New bid less than or equal to previous bid"));
+        assert!(log.contains("\"previous_bid\":\"100\""));
+        assert!(log.contains("\"amount_returned\":\"25\""));
+        assert!(log.contains("\"bid_decimals\":8"));
+        let state: State = load(&deps.storage, CONFIG_KEY).unwrap();
+        assert_eq!(state.bidders.len(), 1);
+
+        // test bid more than previous bid
+        let handle_msg = HandleMsg::Receive {
+            sender: HumanAddr("blah".to_string()),
+            from: HumanAddr("bob".to_string()),
+            amount: Uint128(250),
+            msg: None,
+        };
+        let handle_result = handle(&mut deps, mock_env("bidaddr", &[]), handle_msg);
+        let log = extract_log(handle_result);
+        assert!(log.contains("Previously bid tokens have been returned"));
+        assert!(log.contains("\"amount_bid\":\"250\""));
+        assert!(log.contains("\"amount_returned\":\"100\""));
+        assert!(log.contains("\"bid_decimals\":8"));
+        let state: State = load(&deps.storage, CONFIG_KEY).unwrap();
+        assert_eq!(state.bidders.len(), 1);
+
+        // try bid after close
+        let handle_msg = HandleMsg::Finalize {
+            only_if_bids: false,
+        };
+        let _used = handle(&mut deps, mock_env("alice", &[]), handle_msg);
+        let handle_msg = HandleMsg::Receive {
+            sender: HumanAddr("blah".to_string()),
+            from: HumanAddr("bob".to_string()),
+            amount: Uint128(2500),
+            msg: None,
+        };
+
+        let handle_result = handle(&mut deps, mock_env("bidaddr", &[]), handle_msg);
+        let error = extract_error_msg(handle_result);
+        assert!(error.contains("Auction has ended"));
+    }
+
+    #[test]
+    fn test_retract_bid() {
+        let (init_result, mut deps) = init_helper();
+        assert!(
+            init_result.is_ok(),
+            "Init failed: {}",
+            init_result.err().unwrap()
+        );
+
+        // try no bid placed
+        let handle_msg = HandleMsg::RetractBid {};
+        let handle_result = handle(&mut deps, mock_env("bob", &[]), handle_msg);
+        let message = extract_msg(&handle_result);
+        assert!(message.contains("No active bid for address"));
+        let (amount, decimals) = extract_amount_returned(&handle_result);
+        assert_eq!(amount, None);
+        assert_eq!(decimals, None);
+
+        // sanity check
+        let handle_msg = HandleMsg::Receive {
+            sender: HumanAddr("blah".to_string()),
+            from: HumanAddr("bob".to_string()),
+            amount: Uint128(100),
+            msg: None,
+        };
+        let _handle_result = handle(&mut deps, mock_env("bidaddr", &[]), handle_msg);
+        let state: State = load(&deps.storage, CONFIG_KEY).unwrap();
+        assert_eq!(state.bidders.len(), 1);
+        let bid: Bid = load(
+            &deps.storage,
+            deps.api
+                .canonical_address(&HumanAddr("bob".to_string()))
+                .unwrap()
+                .as_slice(),
+        )
+        .unwrap();
+        assert_eq!(bid.amount, 100);
+
+        let handle_msg = HandleMsg::RetractBid {};
+        let handle_result = handle(&mut deps, mock_env("bob", &[]), handle_msg);
+        let message = extract_msg(&handle_result);
+        assert!(message.contains("Bid retracted.  Tokens have been returned"));
+        let (amount, decimals) = extract_amount_returned(&handle_result);
+        assert_eq!(amount, Some(Uint128(100)));
+        assert_eq!(decimals, Some(8));
+        let state: State = load(&deps.storage, CONFIG_KEY).unwrap();
+        assert_eq!(state.bidders.len(), 0);
+    }
+
+    #[test]
+    fn test_finalize() {
+        let (init_result, mut deps) = init_helper();
+        assert!(
+            init_result.is_ok(),
+            "Init failed: {}",
+            init_result.err().unwrap()
+        );
+
+        // try return all before closing
+        let handle_msg = HandleMsg::ReturnAll {};
+        let handle_result = handle(&mut deps, mock_env("bob", &[]), handle_msg);
+        let error = extract_error_msg(handle_result);
+        assert!(error.contains("return_all can only be executed after the auction has ended"));
+
+        // try non-seller closing before end time
+        let handle_msg = HandleMsg::Finalize {
+            only_if_bids: false,
+        };
+        let handle_result = handle(
+            &mut deps,
+            Env {
+                block: BlockInfo {
+                    height: 12_345,
+                    time: 1,
+                    chain_id: "cosmos-testnet-14002".to_string(),
+                },
+                message: MessageInfo {
+                    sender: HumanAddr("bob".to_string()),
+                    sent_funds: vec![],
+                },
+                contract: cosmwasm_std::ContractInfo {
+                    address: HumanAddr::from(MOCK_CONTRACT_ADDR),
+                },
+                contract_key: Some("".to_string()),
+                contract_code_hash: "".to_string(),
+            },
+            handle_msg,
+        );
+        let error = extract_error_msg(handle_result);
+        assert!(
+            error.contains("Only auction creator can finalize the sale before the closing time")
+        );
+
+        // try non-seller closing after end time
+        let (init_result, mut deps) = init_helper();
+        assert!(
+            init_result.is_ok(),
+            "Init failed: {}",
+            init_result.err().unwrap()
+        );
+
+        let handle_msg = HandleMsg::Finalize {
+            only_if_bids: false,
+        };
+        let handle_result = handle(
+            &mut deps,
+            Env {
+                block: BlockInfo {
+                    height: 12_345,
+                    time: 1000,
+                    chain_id: "cosmos-testnet-14002".to_string(),
+                },
+                message: MessageInfo {
+                    sender: HumanAddr("bob".to_string()),
+                    sent_funds: vec![],
+                },
+                contract: cosmwasm_std::ContractInfo {
+                    address: HumanAddr::from(MOCK_CONTRACT_ADDR),
+                },
+                contract_key: Some("".to_string()),
+                contract_code_hash: "".to_string(),
+            },
+            handle_msg,
+        );
+        let (
+            message,
+            winning_bid,
+            bid_decimals,
+            sell_tokens_received,
+            sell_decimals,
+            bid_tokens_received,
+        ) = extract_finalize_fields(&handle_result);
+        assert_eq!(winning_bid, None);
+        assert_eq!(bid_decimals, None);
+        assert_eq!(sell_tokens_received, None);
+        assert_eq!(sell_decimals, None);
+        assert_eq!(bid_tokens_received, None);
+        assert!(message.contains("Auction has been closed"));
+        assert!(!message.contains("Auction has been closed."));
+
+        let (init_result, mut deps) = init_helper();
+        assert!(
+            init_result.is_ok(),
+            "Init failed: {}",
+            init_result.err().unwrap()
+        );
+
+        // try seller not wanting to close without bids
+        let handle_msg = HandleMsg::Finalize { only_if_bids: true };
+        let handle_result = handle(
+            &mut deps,
+            Env {
+                block: BlockInfo {
+                    height: 12_345,
+                    time: 1,
+                    chain_id: "cosmos-testnet-14002".to_string(),
+                },
+                message: MessageInfo {
+                    sender: HumanAddr("alice".to_string()),
+                    sent_funds: vec![],
+                },
+                contract: cosmwasm_std::ContractInfo {
+                    address: HumanAddr::from(MOCK_CONTRACT_ADDR),
+                },
+                contract_key: Some("".to_string()),
+                contract_code_hash: "".to_string(),
+            },
+            handle_msg,
+        );
+        let error = extract_error_msg(handle_result);
+        assert!(error.contains("Did not close because there are no active bids"));
+
+        // test 3 bidders, highest retracts, other two are tied with time tie-breaker
+        // winner closes after end time
+        let handle_msg = HandleMsg::Receive {
+            sender: HumanAddr("blah".to_string()),
+            from: HumanAddr("bob".to_string()),
+            amount: Uint128(100),
+            msg: None,
+        };
+        let _handle_result = handle(
+            &mut deps,
+            Env {
+                block: BlockInfo {
+                    height: 12_345,
+                    time: 10,
+                    chain_id: "cosmos-testnet-14002".to_string(),
+                },
+                message: MessageInfo {
+                    sender: HumanAddr("bidaddr".to_string()),
+                    sent_funds: vec![],
+                },
+                contract: cosmwasm_std::ContractInfo {
+                    address: HumanAddr::from(MOCK_CONTRACT_ADDR),
+                },
+                contract_key: Some("".to_string()),
+                contract_code_hash: "".to_string(),
+            },
+            handle_msg,
+        );
+        let handle_msg = HandleMsg::Receive {
+            sender: HumanAddr("blah".to_string()),
+            from: HumanAddr("charlie".to_string()),
+            amount: Uint128(100),
+            msg: None,
+        };
+        let _handle_result = handle(
+            &mut deps,
+            Env {
+                block: BlockInfo {
+                    height: 12_345,
+                    time: 12,
+                    chain_id: "cosmos-testnet-14002".to_string(),
+                },
+                message: MessageInfo {
+                    sender: HumanAddr("bidaddr".to_string()),
+                    sent_funds: vec![],
+                },
+                contract: cosmwasm_std::ContractInfo {
+                    address: HumanAddr::from(MOCK_CONTRACT_ADDR),
+                },
+                contract_key: Some("".to_string()),
+                contract_code_hash: "".to_string(),
+            },
+            handle_msg,
+        );
+        let handle_msg = HandleMsg::Receive {
+            sender: HumanAddr("blah".to_string()),
+            from: HumanAddr("david".to_string()),
+            amount: Uint128(1000),
+            msg: None,
+        };
+        let _handle_result = handle(
+            &mut deps,
+            Env {
+                block: BlockInfo {
+                    height: 12_345,
+                    time: 5,
+                    chain_id: "cosmos-testnet-14002".to_string(),
+                },
+                message: MessageInfo {
+                    sender: HumanAddr("bidaddr".to_string()),
+                    sent_funds: vec![],
+                },
+                contract: cosmwasm_std::ContractInfo {
+                    address: HumanAddr::from(MOCK_CONTRACT_ADDR),
+                },
+                contract_key: Some("".to_string()),
+                contract_code_hash: "".to_string(),
+            },
+            handle_msg,
+        );
+        let state: State = load(&deps.storage, CONFIG_KEY).unwrap();
+        assert_eq!(state.bidders.len(), 3);
+        let handle_msg = HandleMsg::RetractBid {};
+        let _handle_result = handle(&mut deps, mock_env("david", &[]), handle_msg);
+        let state: State = load(&deps.storage, CONFIG_KEY).unwrap();
+        assert_eq!(state.bidders.len(), 2);
+
+        let handle_msg = HandleMsg::Receive {
+            sender: HumanAddr("blah".to_string()),
+            from: HumanAddr("alice".to_string()),
+            amount: Uint128(20),
+            msg: None,
+        };
+        let _handle_result = handle(&mut deps, mock_env("selladdr", &[]), handle_msg);
+        let handle_msg = HandleMsg::Finalize { only_if_bids: true };
+        let handle_result = handle(
+            &mut deps,
+            Env {
+                block: BlockInfo {
+                    height: 12_345,
+                    time: 1000,
+                    chain_id: "cosmos-testnet-14002".to_string(),
+                },
+                message: MessageInfo {
+                    sender: HumanAddr("bob".to_string()),
+                    sent_funds: vec![],
+                },
+                contract: cosmwasm_std::ContractInfo {
+                    address: HumanAddr::from(MOCK_CONTRACT_ADDR),
+                },
+                contract_key: Some("".to_string()),
+                contract_code_hash: "".to_string(),
+            },
+            handle_msg,
+        );
+        let (
+            message,
+            winning_bid,
+            bid_decimals,
+            sell_tokens_received,
+            sell_decimals,
+            bid_tokens_received,
+        ) = extract_finalize_fields(&handle_result);
+        assert_eq!(winning_bid, Some(Uint128(100)));
+        assert_eq!(bid_decimals, Some(8));
+        assert_eq!(sell_tokens_received, Some(Uint128(10)));
+        assert_eq!(sell_decimals, Some(4));
+        assert_eq!(bid_tokens_received, None);
+        assert!(message.contains(
+            "Sale has been finalized.  Your bid won! You have been sent the sale token(s)"
+        ));
+
+        // test 3 bidders, highest is seller, seller closes
+        let (init_result, mut deps) = init_helper();
+        assert!(
+            init_result.is_ok(),
+            "Init failed: {}",
+            init_result.err().unwrap()
+        );
+
+        let handle_msg = HandleMsg::Receive {
+            sender: HumanAddr("blah".to_string()),
+            from: HumanAddr("bob".to_string()),
+            amount: Uint128(100),
+            msg: None,
+        };
+        let _handle_result = handle(
+            &mut deps,
+            Env {
+                block: BlockInfo {
+                    height: 12_345,
+                    time: 10,
+                    chain_id: "cosmos-testnet-14002".to_string(),
+                },
+                message: MessageInfo {
+                    sender: HumanAddr("bidaddr".to_string()),
+                    sent_funds: vec![],
+                },
+                contract: cosmwasm_std::ContractInfo {
+                    address: HumanAddr::from(MOCK_CONTRACT_ADDR),
+                },
+                contract_key: Some("".to_string()),
+                contract_code_hash: "".to_string(),
+            },
+            handle_msg,
+        );
+        let handle_msg = HandleMsg::Receive {
+            sender: HumanAddr("blah".to_string()),
+            from: HumanAddr("charlie".to_string()),
+            amount: Uint128(200),
+            msg: None,
+        };
+        let _handle_result = handle(
+            &mut deps,
+            Env {
+                block: BlockInfo {
+                    height: 12_345,
+                    time: 12,
+                    chain_id: "cosmos-testnet-14002".to_string(),
+                },
+                message: MessageInfo {
+                    sender: HumanAddr("bidaddr".to_string()),
+                    sent_funds: vec![],
+                },
+                contract: cosmwasm_std::ContractInfo {
+                    address: HumanAddr::from(MOCK_CONTRACT_ADDR),
+                },
+                contract_key: Some("".to_string()),
+                contract_code_hash: "".to_string(),
+            },
+            handle_msg,
+        );
+        let handle_msg = HandleMsg::Receive {
+            sender: HumanAddr("blah".to_string()),
+            from: HumanAddr("alice".to_string()),
+            amount: Uint128(1000),
+            msg: None,
+        };
+        let _handle_result = handle(
+            &mut deps,
+            Env {
+                block: BlockInfo {
+                    height: 12_345,
+                    time: 5,
+                    chain_id: "cosmos-testnet-14002".to_string(),
+                },
+                message: MessageInfo {
+                    sender: HumanAddr("bidaddr".to_string()),
+                    sent_funds: vec![],
+                },
+                contract: cosmwasm_std::ContractInfo {
+                    address: HumanAddr::from(MOCK_CONTRACT_ADDR),
+                },
+                contract_key: Some("".to_string()),
+                contract_code_hash: "".to_string(),
+            },
+            handle_msg,
+        );
+        let state: State = load(&deps.storage, CONFIG_KEY).unwrap();
+        assert_eq!(state.bidders.len(), 3);
+
+        let handle_msg = HandleMsg::Receive {
+            sender: HumanAddr("blah".to_string()),
+            from: HumanAddr("alice".to_string()),
+            amount: Uint128(20),
+            msg: None,
+        };
+        let _handle_result = handle(&mut deps, mock_env("selladdr", &[]), handle_msg);
+        let handle_msg = HandleMsg::Finalize { only_if_bids: true };
+        let handle_result = handle(
+            &mut deps,
+            Env {
+                block: BlockInfo {
+                    height: 12_345,
+                    time: 1,
+                    chain_id: "cosmos-testnet-14002".to_string(),
+                },
+                message: MessageInfo {
+                    sender: HumanAddr("alice".to_string()),
+                    sent_funds: vec![],
+                },
+                contract: cosmwasm_std::ContractInfo {
+                    address: HumanAddr::from(MOCK_CONTRACT_ADDR),
+                },
+                contract_key: Some("".to_string()),
+                contract_code_hash: "".to_string(),
+            },
+            handle_msg,
+        );
+        let (
+            message,
+            winning_bid,
+            bid_decimals,
+            sell_tokens_received,
+            sell_decimals,
+            bid_tokens_received,
+        ) = extract_finalize_fields(&handle_result);
+        assert_eq!(winning_bid, Some(Uint128(1000)));
+        assert_eq!(bid_decimals, Some(8));
+        assert_eq!(sell_tokens_received, Some(Uint128(10)));
+        assert_eq!(sell_decimals, Some(4));
+        assert_eq!(bid_tokens_received, Some(Uint128(1000)));
+        assert!(message.contains("Sale has been finalized.  You have been sent the winning bid.  Your bid won! You have been sent the sale token(s)"));
+
+        // test 3 bidders, seller loses, seller closes
+        let (init_result, mut deps) = init_helper();
+        assert!(
+            init_result.is_ok(),
+            "Init failed: {}",
+            init_result.err().unwrap()
+        );
+
+        let handle_msg = HandleMsg::Receive {
+            sender: HumanAddr("blah".to_string()),
+            from: HumanAddr("bob".to_string()),
+            amount: Uint128(1000),
+            msg: None,
+        };
+        let _handle_result = handle(
+            &mut deps,
+            Env {
+                block: BlockInfo {
+                    height: 12_345,
+                    time: 10,
+                    chain_id: "cosmos-testnet-14002".to_string(),
+                },
+                message: MessageInfo {
+                    sender: HumanAddr("bidaddr".to_string()),
+                    sent_funds: vec![],
+                },
+                contract: cosmwasm_std::ContractInfo {
+                    address: HumanAddr::from(MOCK_CONTRACT_ADDR),
+                },
+                contract_key: Some("".to_string()),
+                contract_code_hash: "".to_string(),
+            },
+            handle_msg,
+        );
+        let handle_msg = HandleMsg::Receive {
+            sender: HumanAddr("blah".to_string()),
+            from: HumanAddr("charlie".to_string()),
+            amount: Uint128(200),
+            msg: None,
+        };
+        let _handle_result = handle(
+            &mut deps,
+            Env {
+                block: BlockInfo {
+                    height: 12_345,
+                    time: 12,
+                    chain_id: "cosmos-testnet-14002".to_string(),
+                },
+                message: MessageInfo {
+                    sender: HumanAddr("bidaddr".to_string()),
+                    sent_funds: vec![],
+                },
+                contract: cosmwasm_std::ContractInfo {
+                    address: HumanAddr::from(MOCK_CONTRACT_ADDR),
+                },
+                contract_key: Some("".to_string()),
+                contract_code_hash: "".to_string(),
+            },
+            handle_msg,
+        );
+        let handle_msg = HandleMsg::Receive {
+            sender: HumanAddr("blah".to_string()),
+            from: HumanAddr("alice".to_string()),
+            amount: Uint128(25),
+            msg: None,
+        };
+        let _handle_result = handle(
+            &mut deps,
+            Env {
+                block: BlockInfo {
+                    height: 12_345,
+                    time: 5,
+                    chain_id: "cosmos-testnet-14002".to_string(),
+                },
+                message: MessageInfo {
+                    sender: HumanAddr("bidaddr".to_string()),
+                    sent_funds: vec![],
+                },
+                contract: cosmwasm_std::ContractInfo {
+                    address: HumanAddr::from(MOCK_CONTRACT_ADDR),
+                },
+                contract_key: Some("".to_string()),
+                contract_code_hash: "".to_string(),
+            },
+            handle_msg,
+        );
+        let state: State = load(&deps.storage, CONFIG_KEY).unwrap();
+        assert_eq!(state.bidders.len(), 3);
+
+        let handle_msg = HandleMsg::Receive {
+            sender: HumanAddr("blah".to_string()),
+            from: HumanAddr("alice".to_string()),
+            amount: Uint128(20),
+            msg: None,
+        };
+        let _handle_result = handle(&mut deps, mock_env("selladdr", &[]), handle_msg);
+        let handle_msg = HandleMsg::Finalize { only_if_bids: true };
+        let handle_result = handle(
+            &mut deps,
+            Env {
+                block: BlockInfo {
+                    height: 12_345,
+                    time: 1,
+                    chain_id: "cosmos-testnet-14002".to_string(),
+                },
+                message: MessageInfo {
+                    sender: HumanAddr("alice".to_string()),
+                    sent_funds: vec![],
+                },
+                contract: cosmwasm_std::ContractInfo {
+                    address: HumanAddr::from(MOCK_CONTRACT_ADDR),
+                },
+                contract_key: Some("".to_string()),
+                contract_code_hash: "".to_string(),
+            },
+            handle_msg,
+        );
+        let (
+            message,
+            winning_bid,
+            bid_decimals,
+            sell_tokens_received,
+            sell_decimals,
+            bid_tokens_received,
+        ) = extract_finalize_fields(&handle_result);
+        assert_eq!(winning_bid, Some(Uint128(1000)));
+        assert_eq!(bid_decimals, Some(8));
+        assert_eq!(sell_tokens_received, None);
+        assert_eq!(sell_decimals, None);
+        assert_eq!(bid_tokens_received, Some(Uint128(1025)));
+        assert!(message.contains("Sale has been finalized.  You have been sent the winning bid.  Your bid did not win and has been returned"));
+
+        // test 3 bidders, loser closes
+        let (init_result, mut deps) = init_helper();
+        assert!(
+            init_result.is_ok(),
+            "Init failed: {}",
+            init_result.err().unwrap()
+        );
+
+        let handle_msg = HandleMsg::Receive {
+            sender: HumanAddr("blah".to_string()),
+            from: HumanAddr("bob".to_string()),
+            amount: Uint128(500),
+            msg: None,
+        };
+        let _handle_result = handle(
+            &mut deps,
+            Env {
+                block: BlockInfo {
+                    height: 12_345,
+                    time: 10,
+                    chain_id: "cosmos-testnet-14002".to_string(),
+                },
+                message: MessageInfo {
+                    sender: HumanAddr("bidaddr".to_string()),
+                    sent_funds: vec![],
+                },
+                contract: cosmwasm_std::ContractInfo {
+                    address: HumanAddr::from(MOCK_CONTRACT_ADDR),
+                },
+                contract_key: Some("".to_string()),
+                contract_code_hash: "".to_string(),
+            },
+            handle_msg,
+        );
+        let handle_msg = HandleMsg::Receive {
+            sender: HumanAddr("blah".to_string()),
+            from: HumanAddr("charlie".to_string()),
+            amount: Uint128(500),
+            msg: None,
+        };
+        let _handle_result = handle(
+            &mut deps,
+            Env {
+                block: BlockInfo {
+                    height: 12_345,
+                    time: 12,
+                    chain_id: "cosmos-testnet-14002".to_string(),
+                },
+                message: MessageInfo {
+                    sender: HumanAddr("bidaddr".to_string()),
+                    sent_funds: vec![],
+                },
+                contract: cosmwasm_std::ContractInfo {
+                    address: HumanAddr::from(MOCK_CONTRACT_ADDR),
+                },
+                contract_key: Some("".to_string()),
+                contract_code_hash: "".to_string(),
+            },
+            handle_msg,
+        );
+        let handle_msg = HandleMsg::Receive {
+            sender: HumanAddr("blah".to_string()),
+            from: HumanAddr("david".to_string()),
+            amount: Uint128(25),
+            msg: None,
+        };
+        let _handle_result = handle(
+            &mut deps,
+            Env {
+                block: BlockInfo {
+                    height: 12_345,
+                    time: 5,
+                    chain_id: "cosmos-testnet-14002".to_string(),
+                },
+                message: MessageInfo {
+                    sender: HumanAddr("bidaddr".to_string()),
+                    sent_funds: vec![],
+                },
+                contract: cosmwasm_std::ContractInfo {
+                    address: HumanAddr::from(MOCK_CONTRACT_ADDR),
+                },
+                contract_key: Some("".to_string()),
+                contract_code_hash: "".to_string(),
+            },
+            handle_msg,
+        );
+        let state: State = load(&deps.storage, CONFIG_KEY).unwrap();
+        assert_eq!(state.bidders.len(), 3);
+
+        let handle_msg = HandleMsg::Receive {
+            sender: HumanAddr("blah".to_string()),
+            from: HumanAddr("alice".to_string()),
+            amount: Uint128(20),
+            msg: None,
+        };
+        let _handle_result = handle(&mut deps, mock_env("selladdr", &[]), handle_msg);
+        let handle_msg = HandleMsg::Finalize { only_if_bids: true };
+        let handle_result = handle(
+            &mut deps,
+            Env {
+                block: BlockInfo {
+                    height: 12_345,
+                    time: 1000,
+                    chain_id: "cosmos-testnet-14002".to_string(),
+                },
+                message: MessageInfo {
+                    sender: HumanAddr("charlie".to_string()),
+                    sent_funds: vec![],
+                },
+                contract: cosmwasm_std::ContractInfo {
+                    address: HumanAddr::from(MOCK_CONTRACT_ADDR),
+                },
+                contract_key: Some("".to_string()),
+                contract_code_hash: "".to_string(),
+            },
+            handle_msg,
+        );
+        let (
+            message,
+            winning_bid,
+            bid_decimals,
+            sell_tokens_received,
+            sell_decimals,
+            bid_tokens_received,
+        ) = extract_finalize_fields(&handle_result);
+        assert_eq!(winning_bid, Some(Uint128(500)));
+        assert_eq!(bid_decimals, Some(8));
+        assert_eq!(sell_tokens_received, None);
+        assert_eq!(sell_decimals, None);
+        assert_eq!(bid_tokens_received, Some(Uint128(500)));
+        assert!(message
+            .contains("Sale has been finalized.  Your bid did not win and has been returned"));
+
+        // test 3 bidders, seller closes
+        let (init_result, mut deps) = init_helper();
+        assert!(
+            init_result.is_ok(),
+            "Init failed: {}",
+            init_result.err().unwrap()
+        );
+
+        let handle_msg = HandleMsg::Receive {
+            sender: HumanAddr("blah".to_string()),
+            from: HumanAddr("bob".to_string()),
+            amount: Uint128(1000),
+            msg: None,
+        };
+        let _handle_result = handle(
+            &mut deps,
+            Env {
+                block: BlockInfo {
+                    height: 12_345,
+                    time: 10,
+                    chain_id: "cosmos-testnet-14002".to_string(),
+                },
+                message: MessageInfo {
+                    sender: HumanAddr("bidaddr".to_string()),
+                    sent_funds: vec![],
+                },
+                contract: cosmwasm_std::ContractInfo {
+                    address: HumanAddr::from(MOCK_CONTRACT_ADDR),
+                },
+                contract_key: Some("".to_string()),
+                contract_code_hash: "".to_string(),
+            },
+            handle_msg,
+        );
+        let handle_msg = HandleMsg::Receive {
+            sender: HumanAddr("blah".to_string()),
+            from: HumanAddr("charlie".to_string()),
+            amount: Uint128(200),
+            msg: None,
+        };
+        let _handle_result = handle(
+            &mut deps,
+            Env {
+                block: BlockInfo {
+                    height: 12_345,
+                    time: 12,
+                    chain_id: "cosmos-testnet-14002".to_string(),
+                },
+                message: MessageInfo {
+                    sender: HumanAddr("bidaddr".to_string()),
+                    sent_funds: vec![],
+                },
+                contract: cosmwasm_std::ContractInfo {
+                    address: HumanAddr::from(MOCK_CONTRACT_ADDR),
+                },
+                contract_key: Some("".to_string()),
+                contract_code_hash: "".to_string(),
+            },
+            handle_msg,
+        );
+        let handle_msg = HandleMsg::Receive {
+            sender: HumanAddr("blah".to_string()),
+            from: HumanAddr("david".to_string()),
+            amount: Uint128(25),
+            msg: None,
+        };
+        let _handle_result = handle(
+            &mut deps,
+            Env {
+                block: BlockInfo {
+                    height: 12_345,
+                    time: 5,
+                    chain_id: "cosmos-testnet-14002".to_string(),
+                },
+                message: MessageInfo {
+                    sender: HumanAddr("bidaddr".to_string()),
+                    sent_funds: vec![],
+                },
+                contract: cosmwasm_std::ContractInfo {
+                    address: HumanAddr::from(MOCK_CONTRACT_ADDR),
+                },
+                contract_key: Some("".to_string()),
+                contract_code_hash: "".to_string(),
+            },
+            handle_msg,
+        );
+        let state: State = load(&deps.storage, CONFIG_KEY).unwrap();
+        assert_eq!(state.bidders.len(), 3);
+
+        let handle_msg = HandleMsg::Receive {
+            sender: HumanAddr("blah".to_string()),
+            from: HumanAddr("alice".to_string()),
+            amount: Uint128(20),
+            msg: None,
+        };
+        let _handle_result = handle(&mut deps, mock_env("selladdr", &[]), handle_msg);
+        let handle_msg = HandleMsg::Finalize { only_if_bids: true };
+        let handle_result = handle(
+            &mut deps,
+            Env {
+                block: BlockInfo {
+                    height: 12_345,
+                    time: 1000,
+                    chain_id: "cosmos-testnet-14002".to_string(),
+                },
+                message: MessageInfo {
+                    sender: HumanAddr("alice".to_string()),
+                    sent_funds: vec![],
+                },
+                contract: cosmwasm_std::ContractInfo {
+                    address: HumanAddr::from(MOCK_CONTRACT_ADDR),
+                },
+                contract_key: Some("".to_string()),
+                contract_code_hash: "".to_string(),
+            },
+            handle_msg,
+        );
+        let (
+            message,
+            winning_bid,
+            bid_decimals,
+            sell_tokens_received,
+            sell_decimals,
+            bid_tokens_received,
+        ) = extract_finalize_fields(&handle_result);
+        assert_eq!(winning_bid, Some(Uint128(1000)));
+        assert_eq!(bid_decimals, Some(8));
+        assert_eq!(sell_tokens_received, None);
+        assert_eq!(sell_decimals, None);
+        assert_eq!(bid_tokens_received, Some(Uint128(1000)));
+        assert!(message.contains("Sale has been finalized.  You have been sent the winning bid"));
+        assert!(!message.contains("Sale has been finalized.  You have been sent the winning bid."));
+
+        // return all response
+        let handle_msg = HandleMsg::ReturnAll {};
+        let handle_result = handle(&mut deps, mock_env("bob", &[]), handle_msg);
+        let message = extract_msg(&handle_result);
+        assert!(message.contains("Outstanding funds have been returned"));
+
+        // test 3 bidders, stranger closes
+        let (init_result, mut deps) = init_helper();
+        assert!(
+            init_result.is_ok(),
+            "Init failed: {}",
+            init_result.err().unwrap()
+        );
+
+        let handle_msg = HandleMsg::Receive {
+            sender: HumanAddr("blah".to_string()),
+            from: HumanAddr("bob".to_string()),
+            amount: Uint128(1000),
+            msg: None,
+        };
+        let _handle_result = handle(
+            &mut deps,
+            Env {
+                block: BlockInfo {
+                    height: 12_345,
+                    time: 10,
+                    chain_id: "cosmos-testnet-14002".to_string(),
+                },
+                message: MessageInfo {
+                    sender: HumanAddr("bidaddr".to_string()),
+                    sent_funds: vec![],
+                },
+                contract: cosmwasm_std::ContractInfo {
+                    address: HumanAddr::from(MOCK_CONTRACT_ADDR),
+                },
+                contract_key: Some("".to_string()),
+                contract_code_hash: "".to_string(),
+            },
+            handle_msg,
+        );
+        let handle_msg = HandleMsg::Receive {
+            sender: HumanAddr("blah".to_string()),
+            from: HumanAddr("charlie".to_string()),
+            amount: Uint128(200),
+            msg: None,
+        };
+        let _handle_result = handle(
+            &mut deps,
+            Env {
+                block: BlockInfo {
+                    height: 12_345,
+                    time: 12,
+                    chain_id: "cosmos-testnet-14002".to_string(),
+                },
+                message: MessageInfo {
+                    sender: HumanAddr("bidaddr".to_string()),
+                    sent_funds: vec![],
+                },
+                contract: cosmwasm_std::ContractInfo {
+                    address: HumanAddr::from(MOCK_CONTRACT_ADDR),
+                },
+                contract_key: Some("".to_string()),
+                contract_code_hash: "".to_string(),
+            },
+            handle_msg,
+        );
+        let handle_msg = HandleMsg::Receive {
+            sender: HumanAddr("blah".to_string()),
+            from: HumanAddr("david".to_string()),
+            amount: Uint128(25),
+            msg: None,
+        };
+        let _handle_result = handle(
+            &mut deps,
+            Env {
+                block: BlockInfo {
+                    height: 12_345,
+                    time: 5,
+                    chain_id: "cosmos-testnet-14002".to_string(),
+                },
+                message: MessageInfo {
+                    sender: HumanAddr("bidaddr".to_string()),
+                    sent_funds: vec![],
+                },
+                contract: cosmwasm_std::ContractInfo {
+                    address: HumanAddr::from(MOCK_CONTRACT_ADDR),
+                },
+                contract_key: Some("".to_string()),
+                contract_code_hash: "".to_string(),
+            },
+            handle_msg,
+        );
+        let state: State = load(&deps.storage, CONFIG_KEY).unwrap();
+        assert_eq!(state.bidders.len(), 3);
+
+        let handle_msg = HandleMsg::Receive {
+            sender: HumanAddr("blah".to_string()),
+            from: HumanAddr("alice".to_string()),
+            amount: Uint128(20),
+            msg: None,
+        };
+        let _handle_result = handle(&mut deps, mock_env("selladdr", &[]), handle_msg);
+        let handle_msg = HandleMsg::Finalize { only_if_bids: true };
+        let handle_result = handle(
+            &mut deps,
+            Env {
+                block: BlockInfo {
+                    height: 12_345,
+                    time: 1000,
+                    chain_id: "cosmos-testnet-14002".to_string(),
+                },
+                message: MessageInfo {
+                    sender: HumanAddr("edmund".to_string()),
+                    sent_funds: vec![],
+                },
+                contract: cosmwasm_std::ContractInfo {
+                    address: HumanAddr::from(MOCK_CONTRACT_ADDR),
+                },
+                contract_key: Some("".to_string()),
+                contract_code_hash: "".to_string(),
+            },
+            handle_msg,
+        );
+        let (
+            message,
+            winning_bid,
+            bid_decimals,
+            sell_tokens_received,
+            sell_decimals,
+            bid_tokens_received,
+        ) = extract_finalize_fields(&handle_result);
+        assert_eq!(winning_bid, Some(Uint128(1000)));
+        assert_eq!(bid_decimals, Some(8));
+        assert_eq!(sell_tokens_received, None);
+        assert_eq!(sell_decimals, None);
+        assert_eq!(bid_tokens_received, None);
+        assert!(message.contains("Sale has been finalized"));
+        assert!(!message.contains("Sale has been finalized."));
+
+        // test already closed, stranger closes
+        let handle_msg = HandleMsg::Finalize {
+            only_if_bids: false,
+        };
+        let handle_result = handle(
+            &mut deps,
+            Env {
+                block: BlockInfo {
+                    height: 12_345,
+                    time: 1000,
+                    chain_id: "cosmos-testnet-14002".to_string(),
+                },
+                message: MessageInfo {
+                    sender: HumanAddr("bob".to_string()),
+                    sent_funds: vec![],
+                },
+                contract: cosmwasm_std::ContractInfo {
+                    address: HumanAddr::from(MOCK_CONTRACT_ADDR),
+                },
+                contract_key: Some("".to_string()),
+                contract_code_hash: "".to_string(),
+            },
+            handle_msg,
+        );
+        let (
+            message,
+            winning_bid,
+            bid_decimals,
+            sell_tokens_received,
+            sell_decimals,
+            bid_tokens_received,
+        ) = extract_finalize_fields(&handle_result);
+        assert_eq!(winning_bid, None);
+        assert_eq!(bid_decimals, None);
+        assert_eq!(sell_tokens_received, None);
+        assert_eq!(sell_decimals, None);
+        assert_eq!(bid_tokens_received, None);
+        assert!(message.contains("Auction has been closed"));
+        assert!(!message.contains("Auction has been closed."));
+
+        // test no bidders, seller closes
+        let (init_result, mut deps) = init_helper();
+        assert!(
+            init_result.is_ok(),
+            "Init failed: {}",
+            init_result.err().unwrap()
+        );
+
+        let handle_msg = HandleMsg::Receive {
+            sender: HumanAddr("blah".to_string()),
+            from: HumanAddr("alice".to_string()),
+            amount: Uint128(20),
+            msg: None,
+        };
+        let _handle_result = handle(&mut deps, mock_env("selladdr", &[]), handle_msg);
+        let handle_msg = HandleMsg::Finalize {
+            only_if_bids: false,
+        };
+        let handle_result = handle(
+            &mut deps,
+            Env {
+                block: BlockInfo {
+                    height: 12_345,
+                    time: 10,
+                    chain_id: "cosmos-testnet-14002".to_string(),
+                },
+                message: MessageInfo {
+                    sender: HumanAddr("alice".to_string()),
+                    sent_funds: vec![],
+                },
+                contract: cosmwasm_std::ContractInfo {
+                    address: HumanAddr::from(MOCK_CONTRACT_ADDR),
+                },
+                contract_key: Some("".to_string()),
+                contract_code_hash: "".to_string(),
+            },
+            handle_msg,
+        );
+        let (
+            message,
+            winning_bid,
+            bid_decimals,
+            sell_tokens_received,
+            sell_decimals,
+            bid_tokens_received,
+        ) = extract_finalize_fields(&handle_result);
+        assert_eq!(winning_bid, None);
+        assert_eq!(bid_decimals, None);
+        assert_eq!(sell_tokens_received, Some(Uint128(10)));
+        assert_eq!(sell_decimals, Some(4));
+        assert_eq!(bid_tokens_received, None);
+        assert!(message.contains("Auction has been closed.  Consigned tokens have been returned because there were no active bids"));
+
+        // test no bidders, stranger closes
+        let (init_result, mut deps) = init_helper();
+        assert!(
+            init_result.is_ok(),
+            "Init failed: {}",
+            init_result.err().unwrap()
+        );
+
+        let handle_msg = HandleMsg::Receive {
+            sender: HumanAddr("blah".to_string()),
+            from: HumanAddr("alice".to_string()),
+            amount: Uint128(20),
+            msg: None,
+        };
+        let _handle_result = handle(&mut deps, mock_env("selladdr", &[]), handle_msg);
+        let handle_msg = HandleMsg::Finalize {
+            only_if_bids: false,
+        };
+        let handle_result = handle(
+            &mut deps,
+            Env {
+                block: BlockInfo {
+                    height: 12_345,
+                    time: 1000,
+                    chain_id: "cosmos-testnet-14002".to_string(),
+                },
+                message: MessageInfo {
+                    sender: HumanAddr("bob".to_string()),
+                    sent_funds: vec![],
+                },
+                contract: cosmwasm_std::ContractInfo {
+                    address: HumanAddr::from(MOCK_CONTRACT_ADDR),
+                },
+                contract_key: Some("".to_string()),
+                contract_code_hash: "".to_string(),
+            },
+            handle_msg,
+        );
+        let (
+            message,
+            winning_bid,
+            bid_decimals,
+            sell_tokens_received,
+            sell_decimals,
+            bid_tokens_received,
+        ) = extract_finalize_fields(&handle_result);
+        assert_eq!(winning_bid, None);
+        assert_eq!(bid_decimals, None);
+        assert_eq!(sell_tokens_received, None);
+        assert_eq!(sell_decimals, None);
+        assert_eq!(bid_tokens_received, None);
+        assert!(message.contains("Auction has been closed"));
+        assert!(!message.contains("Auction has been closed."));
+    }
+
+    #[test]
+    fn test_query_view_bid() {
+        let (init_result, mut deps) = init_helper();
+        assert!(
+            init_result.is_ok(),
+            "Init failed: {}",
+            init_result.err().unwrap()
+        );
+
+        // try set key but not factory
+        let handle_msg = HandleMsg::SetViewingKey {
+            bidder: HumanAddr("bob".to_string()),
+            key: "key".to_string(),
+        };
+        let handle_result = handle(&mut deps, mock_env("bob", &[]), handle_msg);
+        let error = extract_error_msg(handle_result);
+        assert!(error.contains("Only the factory can set the viewing key"));
+
+        let handle_msg = HandleMsg::SetViewingKey {
+            bidder: HumanAddr("bob".to_string()),
+            key: "key".to_string(),
+        };
+        let _handle_result = handle(&mut deps, mock_env("factoryaddr", &[]), handle_msg);
+
+        // try wrong key
+        let query_msg = QueryMsg::ViewBid {
+            address: HumanAddr("bob".to_string()),
+            viewing_key: "wrong_key".to_string(),
+        };
+        let query_result = query(&deps, query_msg);
+        let error = extract_error_msg(query_result);
+        assert!(error.contains("Wrong viewing key"));
+
+        // try no bid
+        let query_msg = QueryMsg::ViewBid {
+            address: HumanAddr("bob".to_string()),
+            viewing_key: "key".to_string(),
+        };
+        let query_result = query(&deps, query_msg);
+        let (message, bid_decimals) = match from_binary(&query_result.unwrap()).unwrap() {
+            QueryAnswer::Bid {
+                message,
+                bid_decimals,
+                ..
+            } => (message, bid_decimals),
+            _ => panic!("Unexpected"),
+        };
+        assert!(message.contains("No active bid for address: bob"));
+        assert_eq!(bid_decimals, None);
+
+        // sanity check
+        let handle_msg = HandleMsg::Receive {
+            sender: HumanAddr("blah".to_string()),
+            from: HumanAddr("bob".to_string()),
+            amount: Uint128(100),
+            msg: None,
+        };
+        let _handle_result = handle(&mut deps, mock_env("bidaddr", &[]), handle_msg);
+        let query_msg = QueryMsg::ViewBid {
+            address: HumanAddr("bob".to_string()),
+            viewing_key: "key".to_string(),
+        };
+        let query_result = query(&deps, query_msg);
+        let (message, amount_bid, bid_decimals) = match from_binary(&query_result.unwrap()).unwrap()
+        {
+            QueryAnswer::Bid {
+                message,
+                amount_bid,
+                bid_decimals,
+                ..
+            } => (message, amount_bid, bid_decimals),
+            _ => panic!("Unexpected"),
+        };
+        assert!(message.contains("Bid placed"));
+        assert_eq!(amount_bid, Some(Uint128(100)));
+        assert_eq!(bid_decimals, Some(8));
+    }
 }

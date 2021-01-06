@@ -5,12 +5,15 @@
   "type": "object",
   "required": [
     "bid_contract",
+    "bid_decimals",
     "bid_symbol",
+    "ends_at",
     "factory",
     "label",
     "minimum_bid",
     "sell_amount",
     "sell_contract",
+    "sell_decimals",
     "sell_symbol",
     "seller",
     "version"
@@ -23,6 +26,12 @@
           "$ref": "#/definitions/ContractInfo"
         }
       ]
+    },
+    "bid_decimals": {
+      "description": "bid token decimal places,",
+      "type": "integer",
+      "format": "uint8",
+      "minimum": 0.0
     },
     "bid_symbol": {
       "description": "bid symbol index",
@@ -37,6 +46,12 @@
         "string",
         "null"
       ]
+    },
+    "ends_at": {
+      "description": "timestamp after which anyone may close the auction. Timestamp is in seconds since epoch 01/01/1970",
+      "type": "integer",
+      "format": "uint64",
+      "minimum": 0.0
     },
     "factory": {
       "description": "factory contract code hash and address",
@@ -73,6 +88,12 @@
           "$ref": "#/definitions/ContractInfo"
         }
       ]
+    },
+    "sell_decimals": {
+      "description": "sell token decimal places",
+      "type": "integer",
+      "format": "uint8",
+      "minimum": 0.0
     },
     "sell_symbol": {
       "description": "sell symbol index",

@@ -28,6 +28,9 @@ pub enum HandleMsg {
         sell_amount: Uint128,
         /// minimum bid that will be accepted
         minimum_bid: Uint128,
+        /// timestamp after which anyone may close the auction.
+        /// Timestamp is in seconds since epoch 01/01/1970
+        ends_at: u64,
         /// Optional free-form description of the auction (best to avoid double quotes). As an example
         /// it could be the date the owner will likely finalize the auction, or a list of other
         /// auctions for the same token, etc...

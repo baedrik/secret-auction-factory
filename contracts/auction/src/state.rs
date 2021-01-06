@@ -19,8 +19,12 @@ pub struct State {
     pub seller: HumanAddr,
     /// code hash and address of sell token contract
     pub sell_contract: ContractInfo,
+    /// sell token decimal places
+    pub sell_decimals: u8,
     /// code hash and address of bid token contract
     pub bid_contract: ContractInfo,
+    /// bid token decimal places,
+    pub bid_decimals: u8,
     /// amount of tokens for sale
     pub sell_amount: u128,
     /// minimum bid that will be accepted
@@ -29,6 +33,9 @@ pub struct State {
     pub currently_consigned: u128,
     /// list of addresses of bidders
     pub bidders: HashSet<Vec<u8>>,
+    /// timestamp after which anyone may close the auction.
+    /// Timestamp is in seconds since epoch 01/01/1970
+    pub ends_at: u64,
     /// true if the auction is closed
     pub is_completed: bool,
     /// true if all tokens for sale have been consigned to escrow

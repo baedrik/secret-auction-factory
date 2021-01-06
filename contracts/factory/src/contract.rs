@@ -130,6 +130,7 @@ pub fn handle<S: Storage, A: Api, Q: Querier>(
             bid_contract,
             sell_amount,
             minimum_bid,
+            ends_at,
             description,
         } => try_create_auction(
             deps,
@@ -139,6 +140,7 @@ pub fn handle<S: Storage, A: Api, Q: Querier>(
             bid_contract,
             sell_amount,
             minimum_bid,
+            ends_at,
             description,
         ),
         HandleMsg::RegisterAuction {
@@ -176,6 +178,7 @@ pub fn handle<S: Storage, A: Api, Q: Querier>(
 /// * `bid_contract` - ContractInfo containing the code hash and address of the bid token
 /// * `sell_amount` - Uint128 amount to sell in smallest denomination
 /// * `minimum_bid` - Uint128 minimum bid owner will accept
+/// * `ends_at` - time in seconds since epoch 01/01/1970 after which anyone may close the auction
 /// * `description` - optional free-form text string owner may have used to describe the auction
 #[allow(clippy::too_many_arguments)]
 fn try_create_auction<S: Storage, A: Api, Q: Querier>(
@@ -186,6 +189,7 @@ fn try_create_auction<S: Storage, A: Api, Q: Querier>(
     bid_contract: ContractInfo,
     sell_amount: Uint128,
     minimum_bid: Uint128,
+    ends_at: u64,
     description: Option<String>,
 ) -> HandleResult {
     /// Instantiation message
@@ -199,8 +203,12 @@ fn try_create_auction<S: Storage, A: Api, Q: Querier>(
         pub label: String,
         /// sell symbol index
         pub sell_symbol: u16,
+        /// sell token decimal places
+        pub sell_decimals: u8,
         /// bid symbol index
         pub bid_symbol: u16,
+        /// bid token decimal places,
+        pub bid_decimals: u8,
         /// auction seller
         pub seller: HumanAddr,
         /// sell contract code hash and address
@@ -211,6 +219,9 @@ fn try_create_auction<S: Storage, A: Api, Q: Querier>(
         pub sell_amount: Uint128,
         /// minimum bid that will be accepted
         pub minimum_bid: Uint128,
+        /// timestamp after which anyone may close the auction.
+        /// Timestamp is in seconds since epoch 01/01/1970
+        pub ends_at: u64,
         /// Optional free-form description of the auction (best to avoid double quotes). As an example
         /// it could be the date the owner will likely finalize the auction, or a list of other
         /// auctions for the same token, etc...
@@ -241,6 +252,7 @@ fn try_create_auction<S: Storage, A: Api, Q: Querier>(
         sell_contract.code_hash.clone(),
         sell_contract.address.clone(),
     )?;
+    let sell_decimals = sell_token_info.decimals;
     let sell_addr_raw = &deps.api.canonical_address(&sell_contract.address)?;
     let may_sell_index = symmap.get_mut(&sell_addr_raw.as_slice().to_vec()).copied();
     // get bid token info
@@ -250,6 +262,7 @@ fn try_create_auction<S: Storage, A: Api, Q: Querier>(
         bid_contract.code_hash.clone(),
         bid_contract.address.clone(),
     )?;
+    let bid_decimals = bid_token_info.decimals;
     let bid_addr_raw = &deps.api.canonical_address(&bid_contract.address)?;
     let may_bid_index = symmap.get_mut(&bid_addr_raw.as_slice().to_vec()).copied();
     let add_symbol = may_sell_index.is_none() || may_bid_index.is_none();
@@ -301,12 +314,15 @@ fn try_create_auction<S: Storage, A: Api, Q: Querier>(
         version,
         label: label.clone(),
         sell_symbol: sell_index,
+        sell_decimals,
         bid_symbol: bid_index,
+        bid_decimals,
         seller: env.message.sender,
         sell_contract,
         bid_contract,
         sell_amount,
         minimum_bid,
+        ends_at,
         description,
     };
     // save label and only register an auction giving the matching label

@@ -18,8 +18,12 @@ pub struct InitMsg {
     pub label: String,
     /// sell symbol index
     pub sell_symbol: u16,
+    /// sell token decimal places
+    pub sell_decimals: u8,
     /// bid symbol index
     pub bid_symbol: u16,
+    /// bid token decimal places,
+    pub bid_decimals: u8,
     /// auction seller
     pub seller: HumanAddr,
     /// sell contract code hash and address
@@ -30,6 +34,9 @@ pub struct InitMsg {
     pub sell_amount: Uint128,
     /// minimum bid that will be accepted
     pub minimum_bid: Uint128,
+    /// timestamp after which anyone may close the auction.
+    /// Timestamp is in seconds since epoch 01/01/1970
+    pub ends_at: u64,
     /// Optional free-form description of the auction (best to avoid double quotes). As an example
     /// it could be the date the owner will likely finalize the auction, or a list of other
     /// auctions for the same token, etc...
@@ -115,6 +122,8 @@ pub enum QueryAnswer {
         description: Option<String>,
         /// address of auction contract
         auction_address: HumanAddr,
+        /// time at which anyone can close the auction
+        ends_at: String,
         /// status of the auction can be "Accepting bids: Tokens to be sold have(not) been
         /// consigned" or "Closed" (will also state if there are outstanding funds after auction
         /// closure
@@ -132,6 +141,9 @@ pub enum QueryAnswer {
         /// Optional amount bid
         #[serde(skip_serializing_if = "Option::is_none")]
         amount_bid: Option<Uint128>,
+        /// Optional number of decimals in bid amount
+        #[serde(skip_serializing_if = "Option::is_none")]
+        bid_decimals: Option<u8>,
     },
     /// Viewing Key Error
     ViewingKeyError { error: String },
@@ -163,15 +175,16 @@ pub enum HandleAnswer {
         status: ResponseStatus,
         /// execution description
         message: String,
-        /// Optional amount consigned
-        #[serde(skip_serializing_if = "Option::is_none")]
-        amount_consigned: Option<Uint128>,
+        /// amount consigned
+        amount_consigned: Uint128,
         /// Optional amount that still needs to be consigned
         #[serde(skip_serializing_if = "Option::is_none")]
         amount_needed: Option<Uint128>,
         /// Optional amount of tokens returned from escrow
         #[serde(skip_serializing_if = "Option::is_none")]
         amount_returned: Option<Uint128>,
+        /// decimal places for amounts
+        sell_decimals: u8,
     },
     /// response from bid attempt
     Bid {
@@ -191,6 +204,8 @@ pub enum HandleAnswer {
         /// Optional amount of tokens returned from escrow
         #[serde(skip_serializing_if = "Option::is_none")]
         amount_returned: Option<Uint128>,
+        /// decimal places for bid amounts
+        bid_decimals: u8,
     },
     /// response from closing the auction
     CloseAuction {
@@ -201,9 +216,18 @@ pub enum HandleAnswer {
         /// Optional amount of winning bid
         #[serde(skip_serializing_if = "Option::is_none")]
         winning_bid: Option<Uint128>,
-        /// Optional amount of tokens returned form escrow
+        /// Optional number of bid token decimals if there was a winning bid
         #[serde(skip_serializing_if = "Option::is_none")]
-        amount_returned: Option<Uint128>,
+        bid_decimals: Option<u8>,
+        /// Optional amount of sell tokens transferred to auction closer
+        #[serde(skip_serializing_if = "Option::is_none")]
+        sell_tokens_received: Option<Uint128>,
+        /// Optional decimal places for sell token
+        #[serde(skip_serializing_if = "Option::is_none")]
+        sell_decimals: Option<u8>,
+        /// Optional amount of bid tokens transferred to auction closer
+        #[serde(skip_serializing_if = "Option::is_none")]
+        bid_tokens_received: Option<Uint128>,
     },
     /// response from attempt to retract bid
     RetractBid {
@@ -214,18 +238,14 @@ pub enum HandleAnswer {
         /// Optional amount of tokens returned from escrow
         #[serde(skip_serializing_if = "Option::is_none")]
         amount_returned: Option<Uint128>,
-    },
-    /// generic status response
-    Status {
-        /// success or failure
-        status: ResponseStatus,
-        /// execution description
-        message: String,
+        /// Optional decimal places for amount returned
+        #[serde(skip_serializing_if = "Option::is_none")]
+        bid_decimals: Option<u8>,
     },
 }
 
 /// code hash and address of a contract
-#[derive(Serialize, Deserialize, JsonSchema, Clone)]
+#[derive(Serialize, Deserialize, JsonSchema, Clone, PartialEq, Debug)]
 pub struct ContractInfo {
     /// contract's code hash string
     pub code_hash: String,

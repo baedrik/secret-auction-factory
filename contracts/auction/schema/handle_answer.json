@@ -13,18 +13,17 @@
         "consign": {
           "type": "object",
           "required": [
+            "amount_consigned",
             "message",
+            "sell_decimals",
             "status"
           ],
           "properties": {
             "amount_consigned": {
-              "description": "Optional amount consigned",
-              "anyOf": [
+              "description": "amount consigned",
+              "allOf": [
                 {
                   "$ref": "#/definitions/Uint128"
-                },
-                {
-                  "type": "null"
                 }
               ]
             },
@@ -54,6 +53,12 @@
               "description": "execution description",
               "type": "string"
             },
+            "sell_decimals": {
+              "description": "decimal places for amounts",
+              "type": "integer",
+              "format": "uint8",
+              "minimum": 0.0
+            },
             "status": {
               "description": "success or failure",
               "allOf": [
@@ -76,6 +81,7 @@
         "bid": {
           "type": "object",
           "required": [
+            "bid_decimals",
             "message",
             "status"
           ],
@@ -101,6 +107,12 @@
                   "type": "null"
                 }
               ]
+            },
+            "bid_decimals": {
+              "description": "decimal places for bid amounts",
+              "type": "integer",
+              "format": "uint8",
+              "minimum": 0.0
             },
             "message": {
               "description": "execution description",
@@ -154,8 +166,17 @@
             "status"
           ],
           "properties": {
-            "amount_returned": {
-              "description": "Optional amount of tokens returned form escrow",
+            "bid_decimals": {
+              "description": "Optional number of bid token decimals if there was a winning bid",
+              "type": [
+                "integer",
+                "null"
+              ],
+              "format": "uint8",
+              "minimum": 0.0
+            },
+            "bid_tokens_received": {
+              "description": "Optional amount of bid tokens transferred to auction closer",
               "anyOf": [
                 {
                   "$ref": "#/definitions/Uint128"
@@ -168,6 +189,26 @@
             "message": {
               "description": "execution description",
               "type": "string"
+            },
+            "sell_decimals": {
+              "description": "Optional decimal places for sell token",
+              "type": [
+                "integer",
+                "null"
+              ],
+              "format": "uint8",
+              "minimum": 0.0
+            },
+            "sell_tokens_received": {
+              "description": "Optional amount of sell tokens transferred to auction closer",
+              "anyOf": [
+                {
+                  "$ref": "#/definitions/Uint128"
+                },
+                {
+                  "type": "null"
+                }
+              ]
             },
             "status": {
               "description": "success or failure",
@@ -217,36 +258,15 @@
                 }
               ]
             },
-            "message": {
-              "description": "execution description",
-              "type": "string"
+            "bid_decimals": {
+              "description": "Optional decimal places for amount returned",
+              "type": [
+                "integer",
+                "null"
+              ],
+              "format": "uint8",
+              "minimum": 0.0
             },
-            "status": {
-              "description": "success or failure",
-              "allOf": [
-                {
-                  "$ref": "#/definitions/ResponseStatus"
-                }
-              ]
-            }
-          }
-        }
-      }
-    },
-    {
-      "description": "generic status response",
-      "type": "object",
-      "required": [
-        "status"
-      ],
-      "properties": {
-        "status": {
-          "type": "object",
-          "required": [
-            "message",
-            "status"
-          ],
-          "properties": {
             "message": {
               "description": "execution description",
               "type": "string"
