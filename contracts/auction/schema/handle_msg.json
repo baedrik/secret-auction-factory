@@ -132,6 +132,31 @@
           }
         }
       }
+    },
+    {
+      "description": "ChangeMinimumBid allows the seller to change the minimum bid.  The new minimum bid only applies to new bids placed.  Any bid that were already accepted, will still be considered valid bids",
+      "type": "object",
+      "required": [
+        "change_minimum_bid"
+      ],
+      "properties": {
+        "change_minimum_bid": {
+          "type": "object",
+          "required": [
+            "minimum_bid"
+          ],
+          "properties": {
+            "minimum_bid": {
+              "description": "new minimum bid",
+              "allOf": [
+                {
+                  "$ref": "#/definitions/Uint128"
+                }
+              ]
+            }
+          }
+        }
+      }
     }
   ],
   "definitions": {

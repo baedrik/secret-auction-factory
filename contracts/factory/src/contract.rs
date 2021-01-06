@@ -161,6 +161,7 @@ pub fn handle<S: Storage, A: Api, Q: Querier>(
             try_new_contract(deps, env, auction_contract)
         }
         HandleMsg::SetStatus { stop } => try_set_status(deps, env, stop),
+        HandleMsg::ChangeMinimumBid { minimum_bid } => try_change_min_bid(deps, env, minimum_bid),
     };
     pad_handle_result(response, BLOCK_SIZE)
 }
@@ -511,6 +512,54 @@ fn try_close_auction<S: Storage, A: Api, Q: Querier>(
     Ok(HandleResponse {
         messages: vec![],
         log: vec![],
+        data: None,
+    })
+}
+
+/// Returns HandleResult
+///
+/// changes the minimum bid of an auction
+///
+/// # Arguments
+///
+/// * `deps` - mutable reference to Extern containing all the contract's external dependencies
+/// * `env` - Env of contract's environment
+/// * `minimum_bid` - new minimum bid
+fn try_change_min_bid<S: Storage, A: Api, Q: Querier>(
+    deps: &mut Extern<S, A, Q>,
+    env: Env,
+    minimum_bid: Uint128,
+) -> HandleResult {
+    let auction_addr = &deps.api.canonical_address(&env.message.sender)?;
+
+    // verify auction is in active list of auctions and not a spam attempt
+    let mut authenticator = AuthResult::authenticate_auction(&deps.storage, auction_addr)?;
+
+    let may_error = authenticator.error.take();
+    if let Some(error) = may_error {
+        return error;
+    }
+
+    let mut info_store = PrefixedStorage::new(PREFIX_ACTIVE_INFO, &mut deps.storage);
+    let load_auction: Option<StoreAuctionInfo> = may_load(&info_store, auction_addr.as_slice())?;
+    if let Some(mut auction_info) = load_auction {
+        auction_info.minimum_bid = minimum_bid.u128();
+        save(&mut info_store, auction_addr.as_slice(), &auction_info)?;
+        return Ok(HandleResponse {
+            messages: vec![],
+            log: vec![],
+            data: None,
+        });
+    }
+    Ok(HandleResponse {
+        messages: vec![],
+        log: vec![
+            log(
+                "Error",
+                "Unable to register the minimum bid change with the factory contract.",
+            ),
+            log("Reason", "Missing auction information."),
+        ],
         data: None,
     })
 }

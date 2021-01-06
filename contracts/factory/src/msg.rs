@@ -93,6 +93,11 @@ pub enum HandleMsg {
 
     /// Allows an admin to start/stop all auction creation
     SetStatus { stop: bool },
+
+    /// Change the minimum bid of an auction
+    ///
+    /// Only auctions will call this function
+    ChangeMinimumBid { minimum_bid: Uint128 },
 }
 
 /// Queries

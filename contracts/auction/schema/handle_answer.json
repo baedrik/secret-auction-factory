@@ -282,6 +282,47 @@
           }
         }
       }
+    },
+    {
+      "description": "response from attempt to change minimum bid",
+      "type": "object",
+      "required": [
+        "change_minimum_bid"
+      ],
+      "properties": {
+        "change_minimum_bid": {
+          "type": "object",
+          "required": [
+            "bid_decimals",
+            "minimum_bid",
+            "status"
+          ],
+          "properties": {
+            "bid_decimals": {
+              "description": "decimal places for minimum bid",
+              "type": "integer",
+              "format": "uint8",
+              "minimum": 0.0
+            },
+            "minimum_bid": {
+              "description": "new minimum bid",
+              "allOf": [
+                {
+                  "$ref": "#/definitions/Uint128"
+                }
+              ]
+            },
+            "status": {
+              "description": "success or failure",
+              "allOf": [
+                {
+                  "$ref": "#/definitions/ResponseStatus"
+                }
+              ]
+            }
+          }
+        }
+      }
     }
   ],
   "definitions": {

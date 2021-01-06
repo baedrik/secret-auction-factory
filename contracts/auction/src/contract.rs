@@ -74,6 +74,8 @@ pub enum FactoryHandleMsg {
     RegisterBidder { bidder: HumanAddr },
     /// tells factory the address is no longer a bidder in this auction
     RemoveBidder { bidder: HumanAddr },
+    /// tells factory the minimum bid changed
+    ChangeMinimumBid { minimum_bid: Uint128 },
 }
 
 impl HandleCallback for FactoryHandleMsg {
@@ -176,8 +178,56 @@ pub fn handle<S: Storage, A: Api, Q: Querier>(
         HandleMsg::ReturnAll { .. } => try_finalize(deps, env, false, true),
         HandleMsg::Receive { from, amount, .. } => try_receive(deps, env, from, amount),
         HandleMsg::SetViewingKey { key, bidder } => try_set_key(deps, env, &bidder, key),
+        HandleMsg::ChangeMinimumBid { minimum_bid } => try_change_min_bid(deps, env, minimum_bid),
     };
     pad_handle_result(response, BLOCK_SIZE)
+}
+
+/// Returns HandleResult
+///
+/// allows seller to change the minimum bid
+///
+/// # Arguments
+///
+/// * `deps` - mutable reference to Extern containing all the contract's external dependencies
+/// * `env` - Env of contract's environment
+/// * `minimum_bid` - new minimum bid
+fn try_change_min_bid<S: Storage, A: Api, Q: Querier>(
+    deps: &mut Extern<S, A, Q>,
+    env: Env,
+    minimum_bid: Uint128,
+) -> HandleResult {
+    let mut state: State = load(&deps.storage, CONFIG_KEY)?;
+    // only allow the seller to change the minimum bid
+    if env.message.sender != state.seller {
+        return Err(StdError::generic_err(
+            "Only the auction seller can change the minimum bid",
+        ));
+    }
+    // no reason to change the min bid if the auction is over
+    if state.is_completed {
+        return Err(StdError::generic_err(
+            "Can not change the minimum bid of an auction that has ended",
+        ));
+    }
+    // save the min bid change
+    state.minimum_bid = minimum_bid.u128();
+    save(&mut deps.storage, CONFIG_KEY, &state)?;
+    // register change with factory
+    let change_min_msg = FactoryHandleMsg::ChangeMinimumBid { minimum_bid };
+    // perform factory callback
+    let cosmos_msg =
+        change_min_msg.to_cosmos_msg(state.factory.code_hash, state.factory.address, None)?;
+
+    Ok(HandleResponse {
+        messages: vec![cosmos_msg],
+        log: vec![],
+        data: Some(to_binary(&HandleAnswer::ChangeMinimumBid {
+            status: Success,
+            minimum_bid,
+            bid_decimals: state.bid_decimals,
+        })?),
+    })
 }
 
 /// Returns HandleResult
@@ -964,6 +1014,7 @@ mod tests {
             HandleAnswer::Consign { message, .. } => message.clone(),
             HandleAnswer::CloseAuction { message, .. } => message.clone(),
             HandleAnswer::RetractBid { message, .. } => message.clone(),
+            _ => panic!("Unexpected HandleAnswer"),
         }
     }
 
@@ -1256,6 +1307,116 @@ mod tests {
         let handle_result = handle(&mut deps, mock_env("bidaddr", &[]), handle_msg);
         let error = extract_error_msg(handle_result);
         assert!(error.contains("Auction has ended"));
+    }
+
+    #[test]
+    fn test_change_min_bid() {
+        let (init_result, mut deps) = init_helper();
+        assert!(
+            init_result.is_ok(),
+            "Init failed: {}",
+            init_result.err().unwrap()
+        );
+        // try change min bid not seller
+        let handle_msg = HandleMsg::ChangeMinimumBid {
+            minimum_bid: Uint128(20),
+        };
+        let handle_result = handle(&mut deps, mock_env("bob", &[]), handle_msg);
+        let error = extract_error_msg(handle_result);
+        assert!(error.contains("Only the auction seller can change the minimum bid"));
+        let state: State = load(&deps.storage, CONFIG_KEY).unwrap();
+        assert_eq!(state.minimum_bid, 10);
+
+        // try change min bid after close
+        let handle_msg = HandleMsg::Finalize {
+            only_if_bids: false,
+        };
+        let handle_result = handle(
+            &mut deps,
+            Env {
+                block: BlockInfo {
+                    height: 12_345,
+                    time: 1000,
+                    chain_id: "cosmos-testnet-14002".to_string(),
+                },
+                message: MessageInfo {
+                    sender: HumanAddr("bob".to_string()),
+                    sent_funds: vec![],
+                },
+                contract: cosmwasm_std::ContractInfo {
+                    address: HumanAddr::from(MOCK_CONTRACT_ADDR),
+                },
+                contract_key: Some("".to_string()),
+                contract_code_hash: "".to_string(),
+            },
+            handle_msg,
+        );
+        let (
+            message,
+            winning_bid,
+            bid_decimals,
+            sell_tokens_received,
+            sell_decimals,
+            bid_tokens_received,
+        ) = extract_finalize_fields(&handle_result);
+        assert_eq!(winning_bid, None);
+        assert_eq!(bid_decimals, None);
+        assert_eq!(sell_tokens_received, None);
+        assert_eq!(sell_decimals, None);
+        assert_eq!(bid_tokens_received, None);
+        assert!(message.contains("Auction has been closed"));
+        assert!(!message.contains("Auction has been closed."));
+
+        let handle_msg = HandleMsg::ChangeMinimumBid {
+            minimum_bid: Uint128(20),
+        };
+        let handle_result = handle(&mut deps, mock_env("alice", &[]), handle_msg);
+        let error = extract_error_msg(handle_result);
+        assert!(error.contains("Can not change the minimum bid of an auction that has ended"));
+        let state: State = load(&deps.storage, CONFIG_KEY).unwrap();
+        assert_eq!(state.minimum_bid, 10);
+
+        // sanity check
+        let (init_result, mut deps) = init_helper();
+        assert!(
+            init_result.is_ok(),
+            "Init failed: {}",
+            init_result.err().unwrap()
+        );
+        let handle_msg = HandleMsg::Receive {
+            sender: HumanAddr("blah".to_string()),
+            from: HumanAddr("bob".to_string()),
+            amount: Uint128(10),
+            msg: None,
+        };
+        let handle_result = handle(&mut deps, mock_env("bidaddr", &[]), handle_msg);
+        let log = extract_log(handle_result);
+        assert!(log.contains("\"amount_bid\":\"10\""));
+        assert!(log.contains("\"bid_decimals\":8"));
+        let state: State = load(&deps.storage, CONFIG_KEY).unwrap();
+        assert_eq!(state.bidders.len(), 1);
+
+        let handle_msg = HandleMsg::ChangeMinimumBid {
+            minimum_bid: Uint128(20),
+        };
+        let _handle_result = handle(&mut deps, mock_env("alice", &[]), handle_msg);
+        let state: State = load(&deps.storage, CONFIG_KEY).unwrap();
+        assert_eq!(state.minimum_bid, 20);
+
+        let handle_msg = HandleMsg::Receive {
+            sender: HumanAddr("blah".to_string()),
+            from: HumanAddr("charlie".to_string()),
+            amount: Uint128(15),
+            msg: None,
+        };
+        let handle_result = handle(&mut deps, mock_env("bidaddr", &[]), handle_msg);
+        let log = extract_log(handle_result);
+        assert!(log.contains("Bid was less than minimum allowed"));
+        assert!(log.contains("\"minimum_bid\":\"20\""));
+        assert!(log.contains("\"amount_returned\":\"15\""));
+        assert!(log.contains("\"bid_decimals\":8"));
+        let state: State = load(&deps.storage, CONFIG_KEY).unwrap();
+        assert_eq!(state.bidders.len(), 1);
     }
 
     #[test]

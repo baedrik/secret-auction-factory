@@ -292,6 +292,26 @@
           }
         }
       }
+    },
+    {
+      "description": "Change the minimum bid of an auction\n\nOnly auctions will call this function",
+      "type": "object",
+      "required": [
+        "change_minimum_bid"
+      ],
+      "properties": {
+        "change_minimum_bid": {
+          "type": "object",
+          "required": [
+            "minimum_bid"
+          ],
+          "properties": {
+            "minimum_bid": {
+              "$ref": "#/definitions/Uint128"
+            }
+          }
+        }
+      }
     }
   ],
   "definitions": {

@@ -88,6 +88,14 @@ pub enum HandleMsg {
         /// viewing key
         key: String,
     },
+
+    /// ChangeMinimumBid allows the seller to change the minimum bid.  The new minimum bid only
+    /// applies to new bids placed.  Any bid that were already accepted, will still be considered
+    /// valid bids
+    ChangeMinimumBid {
+        /// new minimum bid
+        minimum_bid: Uint128,
+    },
 }
 
 /// Queries
@@ -241,6 +249,15 @@ pub enum HandleAnswer {
         /// Optional decimal places for amount returned
         #[serde(skip_serializing_if = "Option::is_none")]
         bid_decimals: Option<u8>,
+    },
+    /// response from attempt to change minimum bid
+    ChangeMinimumBid {
+        /// success or failure
+        status: ResponseStatus,
+        /// new minimum bid
+        minimum_bid: Uint128,
+        /// decimal places for minimum bid
+        bid_decimals: u8,
     },
 }
 
