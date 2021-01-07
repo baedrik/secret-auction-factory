@@ -44,6 +44,9 @@ pub struct FactoryAuctionInfo {
     pub sell_amount: Uint128,
     /// minimum bid
     pub minimum_bid: Uint128,
+    /// timestamp after which anyone may close the auction
+    /// Timestamp is in seconds since epoch 01/01/1970
+    pub ends_at: u64,
     /// auction contract version number
     pub version: u8,
 }
@@ -133,6 +136,7 @@ pub fn init<S: Storage, A: Api, Q: Querier>(
         bid_symbol: msg.bid_symbol,
         sell_amount: msg.sell_amount,
         minimum_bid: msg.minimum_bid,
+        ends_at: msg.ends_at,
         version: msg.version,
     };
 

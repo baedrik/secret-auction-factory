@@ -263,6 +263,9 @@ pub struct AuctionInfo {
     pub minimum_bid: Uint128,
     /// number of decimal places in minimum_bid
     pub bid_decimals: u8,
+    /// timestamp after which anyone may close the auction.
+    /// Timestamp is in seconds since epoch 01/01/1970
+    pub ends_at: u64,
 }
 
 /// active auction info for storage
@@ -278,6 +281,9 @@ pub struct RegisterAuctionInfo {
     pub sell_amount: Uint128,
     /// minimum bid
     pub minimum_bid: Uint128,
+    /// timestamp after which anyone may close the auction.
+    /// Timestamp is in seconds since epoch 01/01/1970
+    pub ends_at: u64,
     /// auction contract version number
     pub version: u8,
 }
@@ -291,6 +297,7 @@ impl RegisterAuctionInfo {
             bid_symbol: self.bid_symbol,
             sell_amount: self.sell_amount.u128(),
             minimum_bid: self.minimum_bid.u128(),
+            ends_at: self.ends_at,
             version: self.version,
         }
     }
@@ -309,6 +316,9 @@ pub struct StoreAuctionInfo {
     pub sell_amount: u128,
     /// minimum bid
     pub minimum_bid: u128,
+    /// timestamp after which anyone may close the auction.
+    /// Timestamp is in seconds since epoch 01/01/1970
+    pub ends_at: u64,
     /// auction contract version number
     pub version: u8,
 }

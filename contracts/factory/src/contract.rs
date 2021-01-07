@@ -1246,6 +1246,7 @@ fn display_active_list<S: ReadonlyStorage, A: Api>(
                                 sell_decimals: sell_symdec.decimals,
                                 minimum_bid: Uint128(info.minimum_bid),
                                 bid_decimals: bid_symdec.decimals,
+                                ends_at: info.ends_at,
                             });
                         }
                     }

@@ -115,6 +115,7 @@
       "required": [
         "address",
         "bid_decimals",
+        "ends_at",
         "label",
         "minimum_bid",
         "pair",
@@ -134,6 +135,12 @@
           "description": "number of decimal places in minimum_bid",
           "type": "integer",
           "format": "uint8",
+          "minimum": 0.0
+        },
+        "ends_at": {
+          "description": "timestamp after which anyone may close the auction. Timestamp is in seconds since epoch 01/01/1970",
+          "type": "integer",
+          "format": "uint64",
           "minimum": 0.0
         },
         "label": {
