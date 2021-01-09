@@ -686,9 +686,9 @@ fn try_remove_bidder<S: Storage, A: Api, Q: Querier>(
     // verify auction is in active list of auctions and not a spam attempt
     let mut authenticator = AuthResult::authenticate_auction(&deps.storage, auction_addr)?;
 
-    let may_error = authenticator.error.take();
-    if let Some(error) = may_error {
-        return error;
+    // only exit if there is no active list.  Allow removing bidder from a closed auction
+    if authenticator.active.is_none() {
+        return authenticator.error.unwrap();
     }
 
     let mut active = authenticator.active.take().unwrap();
