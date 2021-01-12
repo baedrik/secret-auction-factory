@@ -1,16 +1,15 @@
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 use cosmwasm_std::{
     log, to_binary, Api, CanonicalAddr, Env, Extern, HandleResponse, HandleResult, HumanAddr,
     InitResponse, InitResult, Querier, QueryResult, StdError, Storage, Uint128,
 };
-use cosmwasm_storage::{PrefixedStorage, ReadonlyPrefixedStorage};
 
 use std::collections::HashSet;
 
 use serde_json_wasm as serde_json;
 
-use secret_toolkit::utils::{pad_handle_result, pad_query_result, HandleCallback};
+use secret_toolkit::utils::{pad_handle_result, pad_query_result, HandleCallback, Query};
 
 use crate::msg::{
     ContractInfo, HandleAnswer, HandleMsg, InitMsg, QueryAnswer, QueryMsg, ResponseStatus,
@@ -18,14 +17,11 @@ use crate::msg::{
     Token,
 };
 use crate::state::{load, may_load, remove, save, Bid, State};
-use crate::viewing_key::{ViewingKey, VIEWING_KEY_SIZE};
 
 use chrono::NaiveDateTime;
 
 /// storage key for auction state
 pub const CONFIG_KEY: &[u8] = b"config";
-/// prefix for viewing keys
-pub const PREFIX_VIEW_KEY: &[u8] = b"viewingkey";
 
 /// pad handle responses and log attributes to blocks of 256 bytes to prevent leaking info based on
 /// response size
@@ -47,8 +43,6 @@ pub struct FactoryAuctionInfo {
     /// timestamp after which anyone may close the auction
     /// Timestamp is in seconds since epoch 01/01/1970
     pub ends_at: u64,
-    /// auction contract version number
-    pub version: u8,
 }
 
 /// the factory's handle messages this auction will call
@@ -83,6 +77,35 @@ pub enum FactoryHandleMsg {
 
 impl HandleCallback for FactoryHandleMsg {
     const BLOCK_SIZE: usize = BLOCK_SIZE;
+}
+
+/// the factory's query messages this auction will call
+#[derive(Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum FactoryQueryMsg {
+    /// authenticates the supplied address/viewing key.  This should only be called by auctions
+    IsKeyValid {
+        /// address whose viewing key is being authenticated
+        address: HumanAddr,
+        /// viewing key
+        viewing_key: String,
+    },
+}
+
+impl Query for FactoryQueryMsg {
+    const BLOCK_SIZE: usize = BLOCK_SIZE;
+}
+
+/// result of authenticating address/key pair
+#[derive(Serialize, Deserialize, Debug)]
+pub struct IsKeyValid {
+    pub is_valid: bool,
+}
+
+/// IsKeyValid wrapper struct
+#[derive(Serialize, Deserialize, Debug)]
+pub struct IsKeyValidWrapper {
+    pub is_key_valid: IsKeyValid,
 }
 
 ////////////////////////////////////// Init ///////////////////////////////////////
@@ -137,7 +160,6 @@ pub fn init<S: Storage, A: Api, Q: Querier>(
         sell_amount: msg.sell_amount,
         minimum_bid: msg.minimum_bid,
         ends_at: msg.ends_at,
-        version: msg.version,
     };
 
     let reg_auction_msg = FactoryHandleMsg::RegisterAuction {
@@ -181,7 +203,6 @@ pub fn handle<S: Storage, A: Api, Q: Querier>(
         HandleMsg::Finalize { only_if_bids, .. } => try_finalize(deps, env, only_if_bids, false),
         HandleMsg::ReturnAll { .. } => try_finalize(deps, env, false, true),
         HandleMsg::Receive { from, amount, .. } => try_receive(deps, env, from, amount),
-        HandleMsg::SetViewingKey { key, bidder } => try_set_key(deps, env, &bidder, key),
         HandleMsg::ChangeMinimumBid { minimum_bid } => try_change_min_bid(deps, env, minimum_bid),
     };
     pad_handle_result(response, BLOCK_SIZE)
@@ -231,42 +252,6 @@ fn try_change_min_bid<S: Storage, A: Api, Q: Querier>(
             minimum_bid,
             bid_decimals: state.bid_decimals,
         })?),
-    })
-}
-
-/// Returns HandleResult
-///
-/// called by the factory to set the viewing key for this bidder
-///
-/// # Arguments
-///
-/// * `deps` - mutable reference to Extern containing all the contract's external dependencies
-/// * `env` - Env of contract's environment
-/// * `bidder` - a reference to the address of the bidder whose key should be set
-/// * `key` - string to be used as the viewing key
-fn try_set_key<S: Storage, A: Api, Q: Querier>(
-    deps: &mut Extern<S, A, Q>,
-    env: Env,
-    bidder: &HumanAddr,
-    key: String,
-) -> HandleResult {
-    let state: State = load(&deps.storage, CONFIG_KEY)?;
-    // only allow the factory to set the viewing key
-    if env.message.sender != state.factory.address {
-        return Err(StdError::generic_err(
-            "Only the factory can set the viewing key in order to ensure all auctions use the same key.",
-        ));
-    }
-
-    let vk = ViewingKey(key);
-    let bidder_raw = deps.api.canonical_address(bidder)?;
-    let mut key_store = PrefixedStorage::new(PREFIX_VIEW_KEY, &mut deps.storage);
-    save(&mut key_store, bidder_raw.as_slice(), &vk.to_hashed())?;
-
-    Ok(HandleResponse {
-        messages: vec![],
-        log: vec![],
-        data: None,
     })
 }
 
@@ -880,50 +865,50 @@ fn try_view_bid<S: Storage, A: Api, Q: Querier>(
     bidder: &HumanAddr,
     key: String,
 ) -> QueryResult {
-    let bidder_raw = &deps.api.canonical_address(bidder)?;
-    let read_key = ReadonlyPrefixedStorage::new(PREFIX_VIEW_KEY, &deps.storage);
-    let load_key: Option<[u8; VIEWING_KEY_SIZE]> = may_load(&read_key, bidder_raw.as_slice())?;
+    let state: State = load(&deps.storage, CONFIG_KEY)?;
+    let key_valid_msg = FactoryQueryMsg::IsKeyValid {
+        address: bidder.clone(),
+        viewing_key: key,
+    };
+    let decimals = state.bid_decimals;
+    let key_valid_response: IsKeyValidWrapper = key_valid_msg.query(
+        &deps.querier,
+        state.factory.code_hash,
+        state.factory.address,
+    )?;
 
-    let input_key = ViewingKey(key);
-    // if a key was set
-    if let Some(expected_key) = load_key {
-        // and it matches
-        if input_key.check_viewing_key(&expected_key) {
-            let state: State = load(&deps.storage, CONFIG_KEY)?;
-            let mut amount_bid: Option<Uint128> = None;
-            let mut message = String::new();
-            let status: ResponseStatus;
+    // if authenticated
+    if key_valid_response.is_key_valid.is_valid {
+        let bidder_raw = &deps.api.canonical_address(bidder)?;
+        let mut amount_bid: Option<Uint128> = None;
+        let mut message = String::new();
+        let status: ResponseStatus;
 
-            if state.bidders.contains(&bidder_raw.as_slice().to_vec()) {
-                let bid: Option<Bid> = may_load(&deps.storage, bidder_raw.as_slice())?;
-                if let Some(found_bid) = bid {
-                    status = Success;
-                    amount_bid = Some(Uint128(found_bid.amount));
-                    message.push_str(&format!(
-                        "Bid placed {} UTC",
-                        NaiveDateTime::from_timestamp(found_bid.timestamp as i64, 0)
-                            .format("%Y-%m-%d %H:%M:%S")
-                    ));
-                } else {
-                    status = Failure;
-                    message.push_str(&format!("No active bid for address: {}", bidder));
-                }
-            // no active bid found
+        if state.bidders.contains(&bidder_raw.as_slice().to_vec()) {
+            let bid: Option<Bid> = may_load(&deps.storage, bidder_raw.as_slice())?;
+            if let Some(found_bid) = bid {
+                status = Success;
+                amount_bid = Some(Uint128(found_bid.amount));
+                message.push_str(&format!(
+                    "Bid placed {} UTC",
+                    NaiveDateTime::from_timestamp(found_bid.timestamp as i64, 0)
+                        .format("%Y-%m-%d %H:%M:%S")
+                ));
             } else {
                 status = Failure;
                 message.push_str(&format!("No active bid for address: {}", bidder));
             }
-            return to_binary(&QueryAnswer::Bid {
-                status,
-                message,
-                amount_bid,
-                bid_decimals: amount_bid.map(|_a| state.bid_decimals),
-            });
+        // no active bid found
+        } else {
+            status = Failure;
+            message.push_str(&format!("No active bid for address: {}", bidder));
         }
-    } else {
-        // Checking the key will take significant time. We don't want to exit immediately if it isn't set
-        // in a way which will allow to time the command and determine if a viewing key doesn't exist
-        input_key.check_viewing_key(&[0u8; VIEWING_KEY_SIZE]);
+        return to_binary(&QueryAnswer::Bid {
+            status,
+            message,
+            amount_bid,
+            bid_decimals: amount_bid.map(|_a| decimals),
+        });
     }
 
     to_binary(&QueryAnswer::ViewingKeyError {
@@ -935,7 +920,9 @@ fn try_view_bid<S: Storage, A: Api, Q: Querier>(
 mod tests {
     use super::*;
     use crate::msg::ContractInfo;
-    use cosmwasm_std::{from_binary, testing::*, BlockInfo, MessageInfo, QueryResponse, StdResult};
+    use cosmwasm_std::{
+        from_binary, testing::*, BlockInfo, MessageInfo, QuerierResult, QueryResponse, StdResult,
+    };
     use std::any::Any;
 
     fn init_helper() -> (
@@ -959,7 +946,6 @@ mod tests {
         };
         let init_msg = InitMsg {
             factory,
-            version: 0,
             label: "auction".to_string(),
             sell_symbol: 0,
             sell_decimals: 4,
@@ -976,15 +962,6 @@ mod tests {
         (init(&mut deps, env, init_msg), deps)
     }
 
-    //    fn extract_error_msg<T: Any>(error: StdResult<T>) -> String {
-    //        match error {
-    //            Ok(_response) => "These are not the errors you are looking for".to_string(),
-    //            Err(err) => match err {
-    //                StdError::GenericErr { msg, .. } => msg,
-    //                _ => panic!("Unexpected result from init"),
-    //            },
-    //        }
-    //    }
     fn extract_error_msg<T: Any>(error: StdResult<T>) -> String {
         match error {
             Ok(response) => {
@@ -2546,43 +2523,49 @@ mod tests {
 
     #[test]
     fn test_query_view_bid() {
-        let (init_result, mut deps) = init_helper();
+        let (init_result, deps) = init_helper();
         assert!(
             init_result.is_ok(),
             "Init failed: {}",
             init_result.err().unwrap()
         );
 
-        // try set key but not factory
-        let handle_msg = HandleMsg::SetViewingKey {
-            bidder: HumanAddr("bob".to_string()),
-            key: "key".to_string(),
-        };
-        let handle_result = handle(&mut deps, mock_env("bob", &[]), handle_msg);
-        let error = extract_error_msg(handle_result);
-        assert!(error.contains("Only the factory can set the viewing key"));
-
-        let handle_msg = HandleMsg::SetViewingKey {
-            bidder: HumanAddr("bob".to_string()),
-            key: "key".to_string(),
-        };
-        let _handle_result = handle(&mut deps, mock_env("factoryaddr", &[]), handle_msg);
-
+        #[derive(Debug)]
+        struct MyMockQuerier {
+            pub is_valid: bool,
+        }
+        impl Querier for MyMockQuerier {
+            fn raw_query(&self, _request: &[u8]) -> QuerierResult {
+                Ok(to_binary(&IsKeyValidWrapper {
+                    is_key_valid: IsKeyValid {
+                        is_valid: self.is_valid,
+                    },
+                }))
+            }
+        }
+        let invalid_deps = deps.change_querier(|_| MyMockQuerier { is_valid: false });
         // try wrong key
         let query_msg = QueryMsg::ViewBid {
             address: HumanAddr("bob".to_string()),
             viewing_key: "wrong_key".to_string(),
         };
-        let query_result = query(&deps, query_msg);
+        let query_result = query(&invalid_deps, query_msg);
         let error = extract_error_msg(query_result);
         assert!(error.contains("Wrong viewing key"));
 
+        let (init_result, deps) = init_helper();
+        assert!(
+            init_result.is_ok(),
+            "Init failed: {}",
+            init_result.err().unwrap()
+        );
+        let valid_deps = deps.change_querier(|_| MyMockQuerier { is_valid: true });
         // try no bid
         let query_msg = QueryMsg::ViewBid {
             address: HumanAddr("bob".to_string()),
             viewing_key: "key".to_string(),
         };
-        let query_result = query(&deps, query_msg);
+        let query_result = query(&valid_deps, query_msg);
         let (message, bid_decimals) = match from_binary(&query_result.unwrap()).unwrap() {
             QueryAnswer::Bid {
                 message,
@@ -2595,18 +2578,25 @@ mod tests {
         assert_eq!(bid_decimals, None);
 
         // sanity check
+        let (init_result, deps) = init_helper();
+        assert!(
+            init_result.is_ok(),
+            "Init failed: {}",
+            init_result.err().unwrap()
+        );
+        let mut valid_deps = deps.change_querier(|_| MyMockQuerier { is_valid: true });
         let handle_msg = HandleMsg::Receive {
             sender: HumanAddr("blah".to_string()),
             from: HumanAddr("bob".to_string()),
             amount: Uint128(100),
             msg: None,
         };
-        let _handle_result = handle(&mut deps, mock_env("bidaddr", &[]), handle_msg);
+        let _handle_result = handle(&mut valid_deps, mock_env("bidaddr", &[]), handle_msg);
         let query_msg = QueryMsg::ViewBid {
             address: HumanAddr("bob".to_string()),
             viewing_key: "key".to_string(),
         };
-        let query_result = query(&deps, query_msg);
+        let query_result = query(&valid_deps, query_msg);
         let (message, amount_bid, bid_decimals) = match from_binary(&query_result.unwrap()).unwrap()
         {
             QueryAnswer::Bid {

@@ -15,8 +15,7 @@
     "sell_contract",
     "sell_decimals",
     "sell_symbol",
-    "seller",
-    "version"
+    "seller"
   ],
   "properties": {
     "bid_contract": {
@@ -108,12 +107,6 @@
           "$ref": "#/definitions/HumanAddr"
         }
       ]
-    },
-    "version": {
-      "description": "auction version number",
-      "type": "integer",
-      "format": "uint8",
-      "minimum": 0.0
     }
   },
   "definitions": {

@@ -12,8 +12,6 @@ use crate::contract::BLOCK_SIZE;
 pub struct InitMsg {
     /// factory contract code hash and address
     pub factory: ContractInfo,
-    /// auction version number
-    pub version: u8,
     /// String label for the auction
     pub label: String,
     /// sell symbol index
@@ -79,15 +77,6 @@ pub enum HandleMsg {
     /// those funds to their owners.  Should never be needed, but included in case of unforeseen
     /// error
     ReturnAll {},
-
-    ///  SetViewingkey can only be called by the factory contract to ensure all auctions use the
-    ///  same viewing key for one user
-    SetViewingKey {
-        /// set key for this address
-        bidder: HumanAddr,
-        /// viewing key
-        key: String,
-    },
 
     /// ChangeMinimumBid allows the seller to change the minimum bid.  The new minimum bid only
     /// applies to new bids placed.  Any bid that were already accepted, will still be considered

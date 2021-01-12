@@ -106,6 +106,26 @@
           }
         }
       }
+    },
+    {
+      "description": "result of authenticating address/key pair",
+      "type": "object",
+      "required": [
+        "is_key_valid"
+      ],
+      "properties": {
+        "is_key_valid": {
+          "type": "object",
+          "required": [
+            "is_valid"
+          ],
+          "properties": {
+            "is_valid": {
+              "type": "boolean"
+            }
+          }
+        }
+      }
     }
   ],
   "definitions": {

@@ -104,36 +104,6 @@
       }
     },
     {
-      "description": "SetViewingkey can only be called by the factory contract to ensure all auctions use the same viewing key for one user",
-      "type": "object",
-      "required": [
-        "set_viewing_key"
-      ],
-      "properties": {
-        "set_viewing_key": {
-          "type": "object",
-          "required": [
-            "bidder",
-            "key"
-          ],
-          "properties": {
-            "bidder": {
-              "description": "set key for this address",
-              "allOf": [
-                {
-                  "$ref": "#/definitions/HumanAddr"
-                }
-              ]
-            },
-            "key": {
-              "description": "viewing key",
-              "type": "string"
-            }
-          }
-        }
-      }
-    },
-    {
       "description": "ChangeMinimumBid allows the seller to change the minimum bid.  The new minimum bid only applies to new bids placed.  Any bid that were already accepted, will still be considered valid bids",
       "type": "object",
       "required": [

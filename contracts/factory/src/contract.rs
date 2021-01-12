@@ -12,7 +12,7 @@ use std::collections::{BTreeMap, HashMap, HashSet};
 
 use secret_toolkit::{
     snip20::{send_from_msg, token_info_query},
-    utils::{pad_handle_result, pad_query_result, HandleCallback, InitCallback},
+    utils::{pad_handle_result, pad_query_result, InitCallback},
 };
 
 use crate::msg::{
@@ -22,7 +22,7 @@ use crate::msg::{
 };
 use crate::rand::sha_256;
 use crate::state::{load, may_load, remove, save};
-use crate::viewing_key::ViewingKey;
+use crate::viewing_key::{ViewingKey, VIEWING_KEY_SIZE};
 
 /// prefix for storage of sellers' closed auctions
 pub const PREFIX_SELLERS_CLOSED: &[u8] = b"sellersclosed";
@@ -60,21 +60,6 @@ pub const PENDING_KEY: &[u8] = b"pending";
 /// response size
 pub const BLOCK_SIZE: usize = 256;
 
-#[derive(Serialize)]
-#[serde(rename_all = "snake_case")]
-pub enum SetKeyMsg {
-    /// an auction's SetViewingKey message format
-    SetViewingKey {
-        /// set key for this addres
-        bidder: HumanAddr,
-        /// viewing key
-        key: String,
-    },
-}
-impl HandleCallback for SetKeyMsg {
-    const BLOCK_SIZE: usize = BLOCK_SIZE;
-}
-
 ////////////////////////////////////// Init ///////////////////////////////////////
 /// Returns InitResult
 ///
@@ -91,14 +76,14 @@ pub fn init<S: Storage, A: Api, Q: Querier>(
     msg: InitMsg,
 ) -> InitResult {
     let prng_seed: Vec<u8> = sha_256(base64::encode(msg.entropy).as_bytes()).to_vec();
-    let versions: Vec<AuctionContractInfo> = vec![msg.auction_contract];
+    let version: AuctionContractInfo = msg.auction_contract;
     let active: HashSet<Vec<u8>> = HashSet::new();
     let closed: BTreeMap<u64, Vec<u8>> = BTreeMap::new();
     let symdec: Vec<TokenSymDec> = Vec::new();
     let symdecmap: HashMap<Vec<u8>, u16> = HashMap::new();
     let stopped = false;
 
-    save(&mut deps.storage, VERSION_KEY, &versions)?;
+    save(&mut deps.storage, VERSION_KEY, &version)?;
     save(&mut deps.storage, ADMIN_KEY, &env.message.sender)?;
     save(&mut deps.storage, STATUS_KEY, &stopped)?;
     save(&mut deps.storage, PRNG_SEED_KEY, &prng_seed)?;
@@ -198,8 +183,6 @@ fn try_create_auction<S: Storage, A: Api, Q: Querier>(
     pub struct AuctionInitMsg {
         /// factory contract code hash and address
         pub factory: ContractInfo,
-        /// auction version number
-        pub version: u8,
         /// String label for the auction
         pub label: String,
         /// sell symbol index
@@ -305,14 +288,9 @@ fn try_create_auction<S: Storage, A: Api, Q: Querier>(
     }
 
     // get the current version of the auction contract's hash and code id
-    let mut versions: Vec<AuctionContractInfo> = load(&deps.storage, VERSION_KEY)?;
-    let version = (versions.len() - 1) as u8;
-    let auction_info = versions
-        .pop()
-        .ok_or_else(|| StdError::generic_err("Auction contract version history is corrupted"))?;
+    let auction_info: AuctionContractInfo = load(&deps.storage, VERSION_KEY)?;
     let initmsg = AuctionInitMsg {
         factory,
-        version,
         label: label.clone(),
         sell_symbol: sell_index,
         sell_decimals,
@@ -501,9 +479,8 @@ fn try_close_auction<S: Storage, A: Api, Q: Querier>(
     if let Some(winner) = bidder {
         let winner_raw = &deps.api.canonical_address(winner)?;
         // clean up the bidders list of active auctions
-        let mut dummy = false;
         let mut bidder_store = PrefixedStorage::new(PREFIX_BIDDERS, &mut deps.storage);
-        let win_active = filter_only_active(&bidder_store, winner_raw, &mut active, &mut dummy)?;
+        let (win_active, _) = filter_only_active(&bidder_store, winner_raw, &mut active)?;
         save(&mut bidder_store, winner_raw.as_slice(), &win_active)?;
         // add to winner's closed list
         add_to_persons_closed(&mut deps.storage, PREFIX_WINNERS, winner_raw, auction_addr)?;
@@ -591,78 +568,15 @@ fn try_reg_bidder<S: Storage, A: Api, Q: Querier>(
     let mut active = authenticator.active.take().unwrap();
 
     // clean up the bidders list of active auctions
-    let mut dummy = false;
     let bidder_raw = &deps.api.canonical_address(&bidder)?;
     let mut bidder_store = PrefixedStorage::new(PREFIX_BIDDERS, &mut deps.storage);
-    let mut my_active = filter_only_active(&bidder_store, bidder_raw, &mut active, &mut dummy)?;
+    let (mut my_active, _) = filter_only_active(&bidder_store, bidder_raw, &mut active)?;
     // add this auction to the list
     my_active.insert(auction_addr.as_slice().to_vec());
     save(&mut bidder_store, bidder_raw.as_slice(), &my_active)?;
 
-    // set viewing key (if exists) with this auction
-    let read_key = ReadonlyPrefixedStorage::new(PREFIX_VIEW_KEY, &deps.storage);
-    let load_key: Option<ViewingKey> = may_load(&read_key, bidder_raw.as_slice())?;
-
-    let mut cosmos_msg = Vec::new();
-    if let Some(my_key) = load_key {
-        let load_versions: Option<Vec<AuctionContractInfo>> = may_load(&deps.storage, VERSION_KEY)?;
-        if let Some(mut versions) = load_versions {
-            let key: String = format!("{}", my_key);
-            let read_infos = ReadonlyPrefixedStorage::new(PREFIX_ACTIVE_INFO, &deps.storage);
-            let auction: Option<StoreAuctionInfo> = may_load(&read_infos, auction_addr.as_slice())?;
-            if let Some(auction_info) = auction {
-                if (auction_info.version as usize) < versions.len() {
-                    // set the viewing key with the auction
-                    let set_msg = SetKeyMsg::SetViewingKey { bidder, key };
-                    let contract_info = versions.swap_remove(auction_info.version as usize);
-                    cosmos_msg.push(set_msg.to_cosmos_msg(
-                        contract_info.code_hash,
-                        env.message.sender,
-                        None,
-                    )?);
-                } else {
-                    return Ok(HandleResponse {
-                        messages: vec![],
-                        log: vec![
-                            log(
-                                "Error",
-                                "Unable to register the bid with the factory contract.",
-                            ),
-                            log("Reason", "Missing auction contract info"),
-                        ],
-                        data: None,
-                    });
-                }
-            } else {
-                return Ok(HandleResponse {
-                    messages: vec![],
-                    log: vec![
-                        log(
-                            "Error",
-                            "Unable to register the bid with the factory contract.",
-                        ),
-                        log("Reason", "Missing auction information"),
-                    ],
-                    data: None,
-                });
-            }
-        } else {
-            return Ok(HandleResponse {
-                messages: vec![],
-                log: vec![
-                    log(
-                        "Error",
-                        "Unable to register the bid with the factory contract.",
-                    ),
-                    log("Reason", "Missing auction version list."),
-                ],
-                data: None,
-            });
-        }
-    }
-
     Ok(HandleResponse {
-        messages: cosmos_msg,
+        messages: vec![],
         log: vec![],
         data: None,
     })
@@ -694,10 +608,9 @@ fn try_remove_bidder<S: Storage, A: Api, Q: Querier>(
     let mut active = authenticator.active.take().unwrap();
 
     // clean up the bidders list of active auctions
-    let mut dummy = false;
     let bidder_raw = &deps.api.canonical_address(&bidder)?;
     let mut bidder_store = PrefixedStorage::new(PREFIX_BIDDERS, &mut deps.storage);
-    let mut my_active = filter_only_active(&bidder_store, bidder_raw, &mut active, &mut dummy)?;
+    let (mut my_active, _) = filter_only_active(&bidder_store, bidder_raw, &mut active)?;
     // remove this auction from the list
     my_active.remove(&auction_addr.as_slice().to_vec());
     save(&mut bidder_store, bidder_raw.as_slice(), &my_active)?;
@@ -789,10 +702,8 @@ fn try_new_contract<S: Storage, A: Api, Q: Querier>(
             "This is an admin command. Admin commands can only be run from admin address",
         ));
     }
-    // add to the version list
-    let mut versions: Vec<AuctionContractInfo> = load(&deps.storage, VERSION_KEY)?;
-    versions.push(auction_contract);
-    save(&mut deps.storage, VERSION_KEY, &versions)?;
+    // save new auction contract info
+    save(&mut deps.storage, VERSION_KEY, &auction_contract)?;
 
     Ok(HandleResponse {
         messages: vec![],
@@ -857,11 +768,26 @@ fn try_create_key<S: Storage, A: Api, Q: Querier>(
     let key = ViewingKey::new(&env, &prng_seed, entropy.as_ref());
     let message_sender = &deps.api.canonical_address(&env.message.sender)?;
     let mut key_store = PrefixedStorage::new(PREFIX_VIEW_KEY, &mut deps.storage);
-    save(&mut key_store, message_sender.as_slice(), &key)?;
+    save(&mut key_store, message_sender.as_slice(), &key.to_hashed())?;
 
-    // clean up bidder's active list and set the viewing key with all active auctions
-    let keystr = format!("{}", key);
-    set_key_with_auctions(deps, &env.message.sender, message_sender, &keystr)
+    // clean up the bidder's list of active auctions
+    let load_active: Option<HashSet<Vec<u8>>> = may_load(&deps.storage, ACTIVE_KEY)?;
+    if let Some(mut active) = load_active {
+        let mut bidder_store = PrefixedStorage::new(PREFIX_BIDDERS, &mut deps.storage);
+        let (my_active, update) = filter_only_active(&bidder_store, message_sender, &mut active)?;
+        // if list was updated, save it
+        if update {
+            save(&mut bidder_store, message_sender.as_slice(), &my_active)?;
+        }
+    }
+
+    Ok(HandleResponse {
+        messages: vec![],
+        log: vec![],
+        data: Some(to_binary(&HandleAnswer::ViewingKey {
+            key: format!("{}", key),
+        })?),
+    })
 }
 
 /// Returns HandleResult
@@ -882,83 +808,24 @@ fn try_set_key<S: Storage, A: Api, Q: Querier>(
     let vk = ViewingKey(key.to_string());
     let message_sender = &deps.api.canonical_address(&env.message.sender)?;
     let mut key_store = PrefixedStorage::new(PREFIX_VIEW_KEY, &mut deps.storage);
-    save(&mut key_store, message_sender.as_slice(), &vk)?;
+    save(&mut key_store, message_sender.as_slice(), &vk.to_hashed())?;
 
-    // clean up bidder's active list and set the viewing key with all active auctions
-    set_key_with_auctions(deps, &env.message.sender, message_sender, &key)
-}
-
-/// Returns HandleResult
-///
-/// sets the viewing key with any active auctions the sender is the bidder
-///
-/// # Arguments
-///
-/// * `deps` - mutable reference to Extern containing all the contract's external dependencies
-/// * `msg_sender` - a reference to the human address of the person setting their key
-/// * `sender_raw` - a reference to the canonical address of the person setting their key
-/// * `keystr` - string slice to be used as the viewing key
-fn set_key_with_auctions<S: Storage, A: Api, Q: Querier>(
-    deps: &mut Extern<S, A, Q>,
-    msg_sender: &HumanAddr,
-    sender_raw: &CanonicalAddr,
-    keystr: &str,
-) -> HandleResult {
-    let mut cosmos_msg = Vec::new();
     // clean up the bidder's list of active auctions
     let load_active: Option<HashSet<Vec<u8>>> = may_load(&deps.storage, ACTIVE_KEY)?;
-
     if let Some(mut active) = load_active {
-        let mut update = false;
         let mut bidder_store = PrefixedStorage::new(PREFIX_BIDDERS, &mut deps.storage);
-        let my_active = filter_only_active(&bidder_store, sender_raw, &mut active, &mut update)?;
+        let (my_active, update) = filter_only_active(&bidder_store, message_sender, &mut active)?;
         // if list was updated, save it
         if update {
-            save(&mut bidder_store, sender_raw.as_slice(), &my_active)?;
-        }
-        // set viewing key with every active auction you have a bid with
-        if !my_active.is_empty() {
-            let load_versions: Option<Vec<AuctionContractInfo>> =
-                may_load(&deps.storage, VERSION_KEY)?;
-            if load_versions.is_none() {
-                return Ok(HandleResponse {
-                messages: vec![],
-                log: vec![],
-                data: Some(to_binary(&HandleAnswer::Status {
-                    status: Success,
-                    message: Some("However, unable to set viewing key with individual auctions.  Version list is missing.".to_string()),
-                })?)
-            });
-            }
-            let versions = load_versions.unwrap();
-            let read_infos = ReadonlyPrefixedStorage::new(PREFIX_ACTIVE_INFO, &deps.storage);
-            for addr in my_active {
-                let load_auction: Option<StoreAuctionInfo> =
-                    may_load(&read_infos, addr.as_slice())?;
-                if let Some(auction_info) = load_auction {
-                    let get_contract_info = versions.get(auction_info.version as usize);
-                    if let Some(contract_info) = get_contract_info {
-                        // set key with this auction
-                        let set_msg = SetKeyMsg::SetViewingKey {
-                            bidder: msg_sender.clone(),
-                            key: keystr.to_string(),
-                        };
-                        let human = deps.api.human_address(&CanonicalAddr(Binary(addr)))?;
-                        cosmos_msg.push(set_msg.to_cosmos_msg(
-                            contract_info.code_hash.clone(),
-                            human,
-                            None,
-                        )?);
-                    }
-                }
-            }
+            save(&mut bidder_store, message_sender.as_slice(), &my_active)?;
         }
     }
+
     Ok(HandleResponse {
-        messages: cosmos_msg,
+        messages: vec![],
         log: vec![],
         data: Some(to_binary(&HandleAnswer::ViewingKey {
-            key: keystr.to_string(),
+            key: key.to_string(),
         })?),
     })
 }
@@ -1012,7 +879,8 @@ fn remove_from_persons_active<S: Storage>(
     Ok(())
 }
 
-/// Returns StdResult<HashSet<Vec<u8>>>
+/// Returns StdResult<(HashSet<Vec<u8>>, bool)> which is the address' updated active list
+/// and a bool that is true if the list has been changed from what was in storage
 ///
 /// remove any closed auctions from the list
 ///
@@ -1021,13 +889,11 @@ fn remove_from_persons_active<S: Storage>(
 /// * `storage` - a reference to bidder's active list storage subspace
 /// * `address` - a reference to the canonical address of the person the list belongs to
 /// * `active` - a mutable reference to the HashSet list of active auctions
-/// * `updated` - will be changed to true if the person's list changed
 fn filter_only_active<S: ReadonlyStorage>(
     storage: &S,
     address: &CanonicalAddr,
     active: &mut HashSet<Vec<u8>>,
-    updated: &mut bool,
-) -> StdResult<HashSet<Vec<u8>>> {
+) -> StdResult<(HashSet<Vec<u8>>, bool)> {
     // get person's current list
     let load_auctions: Option<HashSet<Vec<u8>>> = may_load(storage, address.as_slice())?;
 
@@ -1037,12 +903,11 @@ fn filter_only_active<S: ReadonlyStorage>(
         // only keep the intersection of the person's list and the active auctions list
         let my_active: HashSet<Vec<u8>> =
             my_auctions.iter().filter_map(|v| active.take(v)).collect();
-        *updated = start_len != my_active.len();
-        return Ok(my_active);
+        let updated = start_len != my_active.len();
+        return Ok((my_active, updated));
         // if not just return an empty list
     }
-    *updated = false;
-    Ok(HashSet::new())
+    Ok((HashSet::new(), false))
 }
 
 /////////////////////////////////////// Query /////////////////////////////////////
@@ -1063,8 +928,30 @@ pub fn query<S: Storage, A: Api, Q: Querier>(deps: &Extern<S, A, Q>, msg: QueryM
         QueryMsg::ListClosedAuctions { before, page_size } => {
             try_list_closed(deps, before, page_size)
         }
+        QueryMsg::IsKeyValid {
+            address,
+            viewing_key,
+        } => try_validate_key(deps, &address, viewing_key),
     };
     pad_query_result(response, BLOCK_SIZE)
+}
+
+/// Returns QueryResult indicating whether the address/key pair is valid
+///
+/// # Arguments
+///
+/// * `deps` - reference to Extern containing all the contract's external dependencies
+/// * `address` - a reference to the address whose key should be validated
+/// * `viewing_key` - String key used for authentication
+fn try_validate_key<S: Storage, A: Api, Q: Querier>(
+    deps: &Extern<S, A, Q>,
+    address: &HumanAddr,
+    viewing_key: String,
+) -> QueryResult {
+    let addr_raw = &deps.api.canonical_address(address)?;
+    to_binary(&QueryAnswer::IsKeyValid {
+        is_valid: is_key_valid(&deps.storage, addr_raw, viewing_key)?,
+    })
 }
 
 /// Returns QueryResult listing the closed auctions
@@ -1096,6 +983,36 @@ fn try_list_active<S: Storage, A: Api, Q: Querier>(deps: &Extern<S, A, Q>) -> Qu
     })
 }
 
+/// Returns StdResult<bool> result of validating an address' viewing key
+///
+/// # Arguments
+///
+/// * `storage` - a reference to the contract's storage
+/// * `address` - a reference to the address whose key should be validated
+/// * `viewing_key` - String key used for authentication
+fn is_key_valid<S: ReadonlyStorage>(
+    storage: &S,
+    address: &CanonicalAddr,
+    viewing_key: String,
+) -> StdResult<bool> {
+    // load the address' key
+    let read_key = ReadonlyPrefixedStorage::new(PREFIX_VIEW_KEY, storage);
+    let load_key: Option<[u8; VIEWING_KEY_SIZE]> = may_load(&read_key, address.as_slice())?;
+    let input_key = ViewingKey(viewing_key);
+    // if a key was set
+    if let Some(expected_key) = load_key {
+        // and it matches
+        if input_key.check_viewing_key(&expected_key) {
+            return Ok(true);
+        }
+    } else {
+        // Checking the key will take significant time. We don't want to exit immediately if it isn't set
+        // in a way which will allow to time the command and determine if a viewing key doesn't exist
+        input_key.check_viewing_key(&[0u8; VIEWING_KEY_SIZE]);
+    }
+    Ok(false)
+}
+
 /// Returns QueryResult listing the auctions the address interacted with
 ///
 /// # Arguments
@@ -1104,7 +1021,6 @@ fn try_list_active<S: Storage, A: Api, Q: Querier>(deps: &Extern<S, A, Q>) -> Qu
 /// * `address` - a reference to the address whose auctions should be listed
 /// * `viewing_key` - String key used to authenticate the query
 /// * `filter` - optional choice of display filters
-#[allow(clippy::or_fun_call)]
 fn try_list_my<S: Storage, A: Api, Q: Querier>(
     deps: &Extern<S, A, Q>,
     address: &HumanAddr,
@@ -1112,17 +1028,8 @@ fn try_list_my<S: Storage, A: Api, Q: Querier>(
     filter: Option<FilterTypes>,
 ) -> QueryResult {
     let addr_raw = &deps.api.canonical_address(address)?;
-    // load the address' key
-    let read_key = ReadonlyPrefixedStorage::new(PREFIX_VIEW_KEY, &deps.storage);
-    let load_key: Option<ViewingKey> = may_load(&read_key, addr_raw.as_slice())?;
-
-    let input_key = ViewingKey(viewing_key);
-    // if address never set a key, still spend time to check something
-    let expected_key =
-        load_key.unwrap_or(ViewingKey("Still take time to check if none".to_string()));
-
-    // if it matches
-    if input_key.check_viewing_key(&expected_key.to_hashed()) {
+    // if key matches
+    if is_key_valid(&deps.storage, addr_raw, viewing_key)? {
         let mut active_lists: Option<MyActiveLists> = None;
         let mut closed_lists: Option<MyClosedLists> = None;
         // if no filter default to ALL
@@ -1205,10 +1112,9 @@ fn display_active_list<S: ReadonlyStorage, A: Api>(
             // read the factory's active list
             let load_active: Option<HashSet<Vec<u8>>> = may_load(storage, ACTIVE_KEY)?;
             if let Some(mut active) = load_active {
-                let mut update = false;
                 let canonical = CanonicalAddr(Binary(key.to_vec()));
                 // remove any auctions that closed from the list
-                let my_active = filter_only_active(read, &canonical, &mut active, &mut update)?;
+                let (my_active, _) = filter_only_active(read, &canonical, &mut active)?;
                 Some(my_active)
             } else {
                 None

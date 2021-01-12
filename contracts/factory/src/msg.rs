@@ -131,6 +131,13 @@ pub enum QueryMsg {
         #[serde(default)]
         page_size: Option<u32>,
     },
+    /// authenticates the supplied address/viewing key.  This should only be called by auctions
+    IsKeyValid {
+        /// address whose viewing key is being authenticated
+        address: HumanAddr,
+        /// viewing key
+        viewing_key: String,
+    },
 }
 
 /// the filter types when viewing an address' auctions
@@ -169,6 +176,8 @@ pub enum QueryAnswer {
     },
     /// Viewing Key Error
     ViewingKeyError { error: String },
+    /// result of authenticating address/key pair
+    IsKeyValid { is_valid: bool },
 }
 
 /// Lists of active auctions sorted by pair where the address is a seller or bidder
@@ -284,8 +293,6 @@ pub struct RegisterAuctionInfo {
     /// timestamp after which anyone may close the auction.
     /// Timestamp is in seconds since epoch 01/01/1970
     pub ends_at: u64,
-    /// auction contract version number
-    pub version: u8,
 }
 
 impl RegisterAuctionInfo {
@@ -298,7 +305,6 @@ impl RegisterAuctionInfo {
             sell_amount: self.sell_amount.u128(),
             minimum_bid: self.minimum_bid.u128(),
             ends_at: self.ends_at,
-            version: self.version,
         }
     }
 }
@@ -319,8 +325,6 @@ pub struct StoreAuctionInfo {
     /// timestamp after which anyone may close the auction.
     /// Timestamp is in seconds since epoch 01/01/1970
     pub ends_at: u64,
-    /// auction contract version number
-    pub version: u8,
 }
 
 impl StoreAuctionInfo {

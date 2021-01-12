@@ -369,8 +369,7 @@
         "label",
         "minimum_bid",
         "sell_amount",
-        "sell_symbol",
-        "version"
+        "sell_symbol"
       ],
       "properties": {
         "bid_symbol": {
@@ -409,12 +408,6 @@
           "description": "sell symbol index",
           "type": "integer",
           "format": "uint16",
-          "minimum": 0.0
-        },
-        "version": {
-          "description": "auction contract version number",
-          "type": "integer",
-          "format": "uint8",
           "minimum": 0.0
         }
       }

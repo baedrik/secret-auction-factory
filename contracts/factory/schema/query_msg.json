@@ -85,6 +85,36 @@
           }
         }
       }
+    },
+    {
+      "description": "authenticates the supplied address/viewing key.  This should only be called by auctions",
+      "type": "object",
+      "required": [
+        "is_key_valid"
+      ],
+      "properties": {
+        "is_key_valid": {
+          "type": "object",
+          "required": [
+            "address",
+            "viewing_key"
+          ],
+          "properties": {
+            "address": {
+              "description": "address whose viewing key is being authenticated",
+              "allOf": [
+                {
+                  "$ref": "#/definitions/HumanAddr"
+                }
+              ]
+            },
+            "viewing_key": {
+              "description": "viewing key",
+              "type": "string"
+            }
+          }
+        }
+      }
     }
   ],
   "definitions": {
