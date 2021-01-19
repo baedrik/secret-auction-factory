@@ -69,8 +69,10 @@ pub enum HandleMsg {
 
     /// Finalize will close the auction
     Finalize {
-        /// true if auction creator wants to keep the auction open if there are no active bids
-        only_if_bids: bool,
+        /// optional timestamp to extend the closing time to if there are no bids. Timestamp is in
+        /// seconds since epoch 01/01/1970
+        #[serde(default)]
+        new_ends_at: Option<u64>,
     },
 
     /// If the auction holds any funds after it has closed (should never happen), this will return

@@ -79,13 +79,16 @@
       "properties": {
         "finalize": {
           "type": "object",
-          "required": [
-            "only_if_bids"
-          ],
           "properties": {
-            "only_if_bids": {
-              "description": "true if auction creator wants to keep the auction open if there are no active bids",
-              "type": "boolean"
+            "new_ends_at": {
+              "description": "optional timestamp to extend the closing time to if there are no bids. Timestamp is in seconds since epoch 01/01/1970",
+              "default": null,
+              "type": [
+                "integer",
+                "null"
+              ],
+              "format": "uint64",
+              "minimum": 0.0
             }
           }
         }

@@ -200,8 +200,8 @@ pub fn handle<S: Storage, A: Api, Q: Querier>(
 ) -> HandleResult {
     let response = match msg {
         HandleMsg::RetractBid { .. } => try_retract(deps, env.message.sender),
-        HandleMsg::Finalize { only_if_bids, .. } => try_finalize(deps, env, only_if_bids, false),
-        HandleMsg::ReturnAll { .. } => try_finalize(deps, env, false, true),
+        HandleMsg::Finalize { new_ends_at, .. } => try_finalize(deps, env, new_ends_at, false),
+        HandleMsg::ReturnAll { .. } => try_finalize(deps, env, None, true),
         HandleMsg::Receive { from, amount, .. } => try_receive(deps, env, from, amount),
         HandleMsg::ChangeMinimumBid { minimum_bid } => try_change_min_bid(deps, env, minimum_bid),
     };
@@ -578,12 +578,12 @@ fn try_retract<S: Storage, A: Api, Q: Querier>(
 ///
 /// * `deps` - mutable reference to Extern containing all the contract's external dependencies
 /// * `env` - Env of contract's environment
-/// * `only_if_bids` - true if auction should stay open if there are no bids
+/// * `new_ends_at` - optional epoch timestamp to extend closing time to if there are no bids
 /// * `return_all` - true if being called from the return_all fallback plan
 fn try_finalize<S: Storage, A: Api, Q: Querier>(
     deps: &mut Extern<S, A, Q>,
     env: Env,
-    only_if_bids: bool,
+    new_ends_at: Option<u64>,
     return_all: bool,
 ) -> HandleResult {
     let mut state: State = load(&deps.storage, CONFIG_KEY)?;
@@ -601,10 +601,29 @@ fn try_finalize<S: Storage, A: Api, Q: Querier>(
             "Only auction creator can finalize the sale before the closing time",
         ));
     }
-    // if there are no active bids, and only want to close if bids
-    if !state.is_completed && only_if_bids && state.bidders.is_empty() {
+    let no_bids = state.bidders.is_empty();
+    // if there are no active bids, and closer wants to extend the auction
+    if !state.is_completed && new_ends_at.is_some() && no_bids {
+        if env.message.sender == state.seller {
+            state.ends_at = new_ends_at.unwrap();
+            save(&mut deps.storage, CONFIG_KEY, &state)?;
+            return Ok(HandleResponse {
+                messages: vec![],
+                log: vec![],
+                data: Some(to_binary(&HandleAnswer::CloseAuction {
+                    status: Failure,
+                    message: "There were no active bids.  The closing time has been updated"
+                        .to_string(),
+                    winning_bid: None,
+                    bid_decimals: None,
+                    sell_tokens_received: None,
+                    sell_decimals: None,
+                    bid_tokens_received: None,
+                })?),
+            });
+        }
         return Err(StdError::generic_err(
-            "Did not close because there are no active bids",
+            "Only auction creator can change the closing time",
         ));
     }
     let mut cos_msg = Vec::new();
@@ -618,7 +637,6 @@ fn try_finalize<S: Storage, A: Api, Q: Querier>(
     let mut is_winner = false;
     let mut is_loser = false;
 
-    let no_bids = state.bidders.is_empty();
     // if there were bids
     if !no_bids {
         // load all the bids
@@ -1123,9 +1141,7 @@ mod tests {
         assert!(error.contains("Tokens to be sold have already been consigned."));
 
         // try to consign after closing
-        let handle_msg = HandleMsg::Finalize {
-            only_if_bids: false,
-        };
+        let handle_msg = HandleMsg::Finalize { new_ends_at: None };
         let _used = handle(&mut deps, mock_env("alice", &[]), handle_msg);
         let handle_msg = HandleMsg::Receive {
             sender: HumanAddr("blah".to_string()),
@@ -1274,9 +1290,7 @@ mod tests {
         assert_eq!(state.bidders.len(), 1);
 
         // try bid after close
-        let handle_msg = HandleMsg::Finalize {
-            only_if_bids: false,
-        };
+        let handle_msg = HandleMsg::Finalize { new_ends_at: None };
         let _used = handle(&mut deps, mock_env("alice", &[]), handle_msg);
         let handle_msg = HandleMsg::Receive {
             sender: HumanAddr("blah".to_string()),
@@ -1309,9 +1323,7 @@ mod tests {
         assert_eq!(state.minimum_bid, 10);
 
         // try change min bid after close
-        let handle_msg = HandleMsg::Finalize {
-            only_if_bids: false,
-        };
+        let handle_msg = HandleMsg::Finalize { new_ends_at: None };
         let handle_result = handle(
             &mut deps,
             Env {
@@ -1465,9 +1477,7 @@ mod tests {
         assert!(error.contains("return_all can only be executed after the auction has ended"));
 
         // try non-seller closing before end time
-        let handle_msg = HandleMsg::Finalize {
-            only_if_bids: false,
-        };
+        let handle_msg = HandleMsg::Finalize { new_ends_at: None };
         let handle_result = handle(
             &mut deps,
             Env {
@@ -1501,9 +1511,7 @@ mod tests {
             init_result.err().unwrap()
         );
 
-        let handle_msg = HandleMsg::Finalize {
-            only_if_bids: false,
-        };
+        let handle_msg = HandleMsg::Finalize { new_ends_at: None };
         let handle_result = handle(
             &mut deps,
             Env {
@@ -1546,9 +1554,37 @@ mod tests {
             "Init failed: {}",
             init_result.err().unwrap()
         );
+        // try stranger not wanting to close without bids
+        let handle_msg = HandleMsg::Finalize {
+            new_ends_at: Some(2000),
+        };
+        let handle_result = handle(
+            &mut deps,
+            Env {
+                block: BlockInfo {
+                    height: 12_345,
+                    time: 1100,
+                    chain_id: "cosmos-testnet-14002".to_string(),
+                },
+                message: MessageInfo {
+                    sender: HumanAddr("bob".to_string()),
+                    sent_funds: vec![],
+                },
+                contract: cosmwasm_std::ContractInfo {
+                    address: HumanAddr::from(MOCK_CONTRACT_ADDR),
+                },
+                contract_key: Some("".to_string()),
+                contract_code_hash: "".to_string(),
+            },
+            handle_msg,
+        );
+        let error = extract_error_msg(handle_result);
+        assert!(error.contains("Only auction creator can change the closing time"));
 
         // try seller not wanting to close without bids
-        let handle_msg = HandleMsg::Finalize { only_if_bids: true };
+        let handle_msg = HandleMsg::Finalize {
+            new_ends_at: Some(2000),
+        };
         let handle_result = handle(
             &mut deps,
             Env {
@@ -1569,8 +1605,22 @@ mod tests {
             },
             handle_msg,
         );
-        let error = extract_error_msg(handle_result);
-        assert!(error.contains("Did not close because there are no active bids"));
+        let (
+            message,
+            winning_bid,
+            bid_decimals,
+            sell_tokens_received,
+            sell_decimals,
+            bid_tokens_received,
+        ) = extract_finalize_fields(&handle_result);
+        assert_eq!(winning_bid, None);
+        assert_eq!(bid_decimals, None);
+        assert_eq!(sell_tokens_received, None);
+        assert_eq!(sell_decimals, None);
+        assert_eq!(bid_tokens_received, None);
+        assert!(message.contains("There were no active bids.  The closing time has been updated"));
+        let state: State = load(&deps.storage, CONFIG_KEY).unwrap();
+        assert_eq!(state.ends_at, 2000);
 
         // test 3 bidders, highest retracts, other two are tied with time tie-breaker
         // winner closes after end time
@@ -1666,13 +1716,15 @@ mod tests {
             msg: None,
         };
         let _handle_result = handle(&mut deps, mock_env("selladdr", &[]), handle_msg);
-        let handle_msg = HandleMsg::Finalize { only_if_bids: true };
+        let handle_msg = HandleMsg::Finalize {
+            new_ends_at: Some(2000),
+        };
         let handle_result = handle(
             &mut deps,
             Env {
                 block: BlockInfo {
                     height: 12_345,
-                    time: 1000,
+                    time: 2000,
                     chain_id: "cosmos-testnet-14002".to_string(),
                 },
                 message: MessageInfo {
@@ -1800,7 +1852,9 @@ mod tests {
             msg: None,
         };
         let _handle_result = handle(&mut deps, mock_env("selladdr", &[]), handle_msg);
-        let handle_msg = HandleMsg::Finalize { only_if_bids: true };
+        let handle_msg = HandleMsg::Finalize {
+            new_ends_at: Some(2000),
+        };
         let handle_result = handle(
             &mut deps,
             Env {
@@ -1932,7 +1986,9 @@ mod tests {
             msg: None,
         };
         let _handle_result = handle(&mut deps, mock_env("selladdr", &[]), handle_msg);
-        let handle_msg = HandleMsg::Finalize { only_if_bids: true };
+        let handle_msg = HandleMsg::Finalize {
+            new_ends_at: Some(2000),
+        };
         let handle_result = handle(
             &mut deps,
             Env {
@@ -2064,7 +2120,7 @@ mod tests {
             msg: None,
         };
         let _handle_result = handle(&mut deps, mock_env("selladdr", &[]), handle_msg);
-        let handle_msg = HandleMsg::Finalize { only_if_bids: true };
+        let handle_msg = HandleMsg::Finalize { new_ends_at: None };
         let handle_result = handle(
             &mut deps,
             Env {
@@ -2197,7 +2253,7 @@ mod tests {
             msg: None,
         };
         let _handle_result = handle(&mut deps, mock_env("selladdr", &[]), handle_msg);
-        let handle_msg = HandleMsg::Finalize { only_if_bids: true };
+        let handle_msg = HandleMsg::Finalize { new_ends_at: None };
         let handle_result = handle(
             &mut deps,
             Env {
@@ -2336,7 +2392,7 @@ mod tests {
             msg: None,
         };
         let _handle_result = handle(&mut deps, mock_env("selladdr", &[]), handle_msg);
-        let handle_msg = HandleMsg::Finalize { only_if_bids: true };
+        let handle_msg = HandleMsg::Finalize { new_ends_at: None };
         let handle_result = handle(
             &mut deps,
             Env {
@@ -2374,9 +2430,7 @@ mod tests {
         assert!(!message.contains("Sale has been finalized."));
 
         // test already closed, stranger closes
-        let handle_msg = HandleMsg::Finalize {
-            only_if_bids: false,
-        };
+        let handle_msg = HandleMsg::Finalize { new_ends_at: None };
         let handle_result = handle(
             &mut deps,
             Env {
@@ -2428,9 +2482,7 @@ mod tests {
             msg: None,
         };
         let _handle_result = handle(&mut deps, mock_env("selladdr", &[]), handle_msg);
-        let handle_msg = HandleMsg::Finalize {
-            only_if_bids: false,
-        };
+        let handle_msg = HandleMsg::Finalize { new_ends_at: None };
         let handle_result = handle(
             &mut deps,
             Env {
@@ -2481,9 +2533,7 @@ mod tests {
             msg: None,
         };
         let _handle_result = handle(&mut deps, mock_env("selladdr", &[]), handle_msg);
-        let handle_msg = HandleMsg::Finalize {
-            only_if_bids: false,
-        };
+        let handle_msg = HandleMsg::Finalize { new_ends_at: None };
         let handle_result = handle(
             &mut deps,
             Env {
