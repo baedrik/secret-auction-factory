@@ -71,8 +71,13 @@ pub enum FactoryHandleMsg {
     RegisterBidder { bidder: HumanAddr },
     /// tells factory the address is no longer a bidder in this auction
     RemoveBidder { bidder: HumanAddr },
-    /// tells factory the minimum bid changed
-    ChangeMinimumBid { minimum_bid: Uint128 },
+    /// tells factory the closing time and/or minimum bid changed
+    ChangeAuctionInfo {
+        /// optional new ends_at time in seconds since epoch 01/01/1970
+        ends_at: Option<u64>,
+        /// optional new minimum bid
+        minimum_bid: Option<Uint128>,
+    },
 }
 
 impl HandleCallback for FactoryHandleMsg {
@@ -242,7 +247,10 @@ fn try_change_min_bid<S: Storage, A: Api, Q: Querier>(
     state.minimum_bid = minimum_bid.u128();
     save(&mut deps.storage, CONFIG_KEY, &state)?;
     // register change with factory
-    let change_min_msg = FactoryHandleMsg::ChangeMinimumBid { minimum_bid };
+    let change_min_msg = FactoryHandleMsg::ChangeAuctionInfo {
+        ends_at: None,
+        minimum_bid: Some(minimum_bid),
+    };
     // perform factory callback
     let cosmos_msg =
         change_min_msg.to_cosmos_msg(state.factory.code_hash, state.factory.address, None)?;
@@ -617,23 +625,21 @@ fn try_finalize<S: Storage, A: Api, Q: Querier>(
     let no_bids = state.bidders.is_empty();
     // if there are no active bids, and closer wants to extend the auction
     if no_bids && !state.is_completed && (update_ends_at || update_min_bid) {
-        let mut factory_msg = Vec::new();
         if let Some(ends_at) = new_ends_at {
             state.ends_at = ends_at;
         }
         if let Some(minimum_bid) = new_minimum_bid {
-            // save the min bid change
             state.minimum_bid = minimum_bid.u128();
-            // register change with factory
-            let change_min_msg = FactoryHandleMsg::ChangeMinimumBid { minimum_bid };
-            // perform factory callback
-            factory_msg.push(change_min_msg.to_cosmos_msg(
-                state.factory.code_hash.clone(),
-                state.factory.address.clone(),
-                None,
-            )?);
         }
         save(&mut deps.storage, CONFIG_KEY, &state)?;
+        // register change with factory
+        let change_min_msg = FactoryHandleMsg::ChangeAuctionInfo {
+            ends_at: new_ends_at,
+            minimum_bid: new_minimum_bid,
+        };
+        // perform factory callback
+        let factory_msg =
+            change_min_msg.to_cosmos_msg(state.factory.code_hash, state.factory.address, None)?;
         let time_str = if update_ends_at { " closing time" } else { "" };
         let bid_str = if update_min_bid { " minimum bid" } else { "" };
         let and_str = if update_ends_at && update_min_bid {
@@ -646,7 +652,7 @@ fn try_finalize<S: Storage, A: Api, Q: Querier>(
             time_str, and_str, bid_str
         );
         return Ok(HandleResponse {
-            messages: factory_msg,
+            messages: vec![factory_msg],
             log: vec![],
             data: Some(to_binary(&HandleAnswer::CloseAuction {
                 status: Failure,

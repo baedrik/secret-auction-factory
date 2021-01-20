@@ -294,20 +294,36 @@
       }
     },
     {
-      "description": "Change the minimum bid of an auction\n\nOnly auctions will call this function",
+      "description": "Change the closing time and/or minimum bid of an auction\n\nOnly auctions will call this function",
       "type": "object",
       "required": [
-        "change_minimum_bid"
+        "change_auction_info"
       ],
       "properties": {
-        "change_minimum_bid": {
+        "change_auction_info": {
           "type": "object",
-          "required": [
-            "minimum_bid"
-          ],
           "properties": {
+            "ends_at": {
+              "description": "optional new closing time in seconds since epoch 01/01/1970",
+              "default": null,
+              "type": [
+                "integer",
+                "null"
+              ],
+              "format": "uint64",
+              "minimum": 0.0
+            },
             "minimum_bid": {
-              "$ref": "#/definitions/Uint128"
+              "description": "optional new minimum bid",
+              "default": null,
+              "anyOf": [
+                {
+                  "$ref": "#/definitions/Uint128"
+                },
+                {
+                  "type": "null"
+                }
+              ]
             }
           }
         }

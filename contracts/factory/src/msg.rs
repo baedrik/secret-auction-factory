@@ -94,10 +94,17 @@ pub enum HandleMsg {
     /// Allows an admin to start/stop all auction creation
     SetStatus { stop: bool },
 
-    /// Change the minimum bid of an auction
+    /// Change the closing time and/or minimum bid of an auction
     ///
     /// Only auctions will call this function
-    ChangeMinimumBid { minimum_bid: Uint128 },
+    ChangeAuctionInfo {
+        /// optional new closing time in seconds since epoch 01/01/1970
+        #[serde(default)]
+        ends_at: Option<u64>,
+        /// optional new minimum bid
+        #[serde(default)]
+        minimum_bid: Option<Uint128>,
+    },
 }
 
 /// Queries

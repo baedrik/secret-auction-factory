@@ -146,7 +146,10 @@ pub fn handle<S: Storage, A: Api, Q: Querier>(
             try_new_contract(deps, env, auction_contract)
         }
         HandleMsg::SetStatus { stop } => try_set_status(deps, env, stop),
-        HandleMsg::ChangeMinimumBid { minimum_bid } => try_change_min_bid(deps, env, minimum_bid),
+        HandleMsg::ChangeAuctionInfo {
+            ends_at,
+            minimum_bid,
+        } => try_change_auction_info(deps, env, ends_at, minimum_bid),
     };
     pad_handle_result(response, BLOCK_SIZE)
 }
@@ -495,17 +498,19 @@ fn try_close_auction<S: Storage, A: Api, Q: Querier>(
 
 /// Returns HandleResult
 ///
-/// changes the minimum bid of an auction
+/// changes the closing time and/or minimum bid of an auction
 ///
 /// # Arguments
 ///
 /// * `deps` - mutable reference to Extern containing all the contract's external dependencies
 /// * `env` - Env of contract's environment
-/// * `minimum_bid` - new minimum bid
-fn try_change_min_bid<S: Storage, A: Api, Q: Querier>(
+/// * `ends_at` - optional new closing time
+/// * `minimum_bid` - optional new minimum bid
+fn try_change_auction_info<S: Storage, A: Api, Q: Querier>(
     deps: &mut Extern<S, A, Q>,
     env: Env,
-    minimum_bid: Uint128,
+    ends_at: Option<u64>,
+    minimum_bid: Option<Uint128>,
 ) -> HandleResult {
     let auction_addr = &deps.api.canonical_address(&env.message.sender)?;
 
@@ -520,7 +525,12 @@ fn try_change_min_bid<S: Storage, A: Api, Q: Querier>(
     let mut info_store = PrefixedStorage::new(PREFIX_ACTIVE_INFO, &mut deps.storage);
     let load_auction: Option<StoreAuctionInfo> = may_load(&info_store, auction_addr.as_slice())?;
     if let Some(mut auction_info) = load_auction {
-        auction_info.minimum_bid = minimum_bid.u128();
+        if let Some(min_bid) = minimum_bid {
+            auction_info.minimum_bid = min_bid.u128();
+        }
+        if let Some(ends) = ends_at {
+            auction_info.ends_at = ends;
+        }
         save(&mut info_store, auction_addr.as_slice(), &auction_info)?;
         return Ok(HandleResponse {
             messages: vec![],
@@ -533,7 +543,7 @@ fn try_change_min_bid<S: Storage, A: Api, Q: Querier>(
         log: vec![
             log(
                 "Error",
-                "Unable to register the minimum bid change with the factory contract.",
+                "Unable to register the closing time/minimum bid change with the factory contract.",
             ),
             log("Reason", "Missing auction information."),
         ],
