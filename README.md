@@ -6,13 +6,13 @@ Although the original auction contract will no longer be updated, the repo will 
 ## Creating a New Auction
 First you must give the factory an allowance to consign the tokens for sale to the new auction's escrow:
 ```sh
-secretcli tx compute execute *sale_tokens_contract_address* '{"increase_allowance":{"spender":"secret1lgl96rs8lcpryc77kmw9x9lmwet48hyzdvhamn","amount":"*amount_being_sold_in_smallest_denomination_of_sale_token*"}}' --from *your_key_alias_or_addr* --gas 150000 -y
+secretcli tx compute execute *sale_tokens_contract_address* '{"increase_allowance":{"spender":"secret16qfc24c2qcdl8s6lkgdp9d08xn778hx9tc6j3p","amount":"*amount_being_sold_in_smallest_denomination_of_sale_token*"}}' --from *your_key_alias_or_addr* --gas 150000 -y
 ```
 Granting allowance does not send any tokens, it only gives the factory permission to send tokens on your behalf. If for some reason after performing the above command you decide not to proceed with creating the auction, you may revoke that permission by using the `decrease_allowance` command. `decrease_allowance` follows the exact same input format as the above command.
 
 Then you can create the auction with:
 ```sh
-secretcli tx compute execute --label 253dot2 '{"create_auction":{"label":"*your_auction_name*","sell_contract":{"code_hash":"*sale_tokens_code_hash*","address":"*sale_tokens_contract_address*"},"bid_contract":{"code_hash":"*bid_tokens_code_hash*","address":"*bid_tokens_contract_address*"},"sell_amount":"*amount_being_sold_in_smallest_denomination_of_sale_token*","minimum_bid":"*minimum_accepted_bid_in_smallest_denomination_of_bid_token*","ends_at":*seconds_since_epoch_after_which_anyone_may_close_the_auction*,"description":"*optional_text_description*"}}' --from *your_key_alias_or_addr* --gas 600000 -y
+secretcli tx compute execute --label 253dot3 '{"create_auction":{"label":"*your_auction_name*","sell_contract":{"code_hash":"*sale_tokens_code_hash*","address":"*sale_tokens_contract_address*"},"bid_contract":{"code_hash":"*bid_tokens_code_hash*","address":"*bid_tokens_contract_address*"},"sell_amount":"*amount_being_sold_in_smallest_denomination_of_sale_token*","minimum_bid":"*minimum_accepted_bid_in_smallest_denomination_of_bid_token*","ends_at":*seconds_since_epoch_after_which_anyone_may_close_the_auction*,"description":"*optional_text_description*"}}' --from *your_key_alias_or_addr* --gas 600000 -y
 ```
 You can find a contract's code hash with
 ```sh
@@ -40,11 +40,11 @@ The new minimum bid will only apply to newly placed bids.  Any bids that were va
 ## Create a Viewing Key
 You can have the factory generate a new viewing key with:
 ``` sh
-secretcli tx compute execute --label 253dot2 '{"create_viewing_key":{"entropy":"*Some arbitrary string used as entropy in generating the random viewing key*"}}' --from *your_key_alias_or_addr* --gas 120000 -y
+secretcli tx compute execute --label 253dot3 '{"create_viewing_key":{"entropy":"*Some arbitrary string used as entropy in generating the random viewing key*"}}' --from *your_key_alias_or_addr* --gas 120000 -y
 ```
 or you can set the viewing key with
 ``` sh
-secretcli tx compute execute --label 253dot2 '{"set_viewing_key":{"key":"*The viewing key you want*","padding":"Optional string used to pad the message length so it does not leak the length of the key"}}' --from *your_key_alias_or_addr* --gas 120000 -y
+secretcli tx compute execute --label 253dot3 '{"set_viewing_key":{"key":"*The viewing key you want*","padding":"Optional string used to pad the message length so it does not leak the length of the key"}}' --from *your_key_alias_or_addr* --gas 120000 -y
 ```
 A viewing key allows you to query the factory contract for a list of only the auctions you have interacted with.  It also allows you to view your bid information by querying the individual auctions.  It is recommended to use `create_viewing_key` to set your viewing key instead of using `set_viewing_key` because `create_viewing_key` will generate a complex key, whereas `set_viewing_key` will just accept whatever key it is given.  `set_viewing_key` is provided if a UI would like to generate the viewing key itself.  If you are developing a UI and are using `set_viewing_key`, also use the `padding` field so that the length of the message does not leak information about the length of the viewing key.
 
@@ -69,12 +69,13 @@ You may retract your bid at any time before the auction closes to both retract y
 ## Finalizing the Auction Sale
 An auction may be closed with:
 ```sh
-secretcli tx compute execute *auction_contract_address* '{"finalize": {"only_if_bids": *true_or_false*}}' --from *your_key_alias_or_addr* --gas 2000000 -y
+secretcli tx compute execute *auction_contract_address* '{"finalize": {"new_ends_at":*optional_updated_seconds_since_epoch_after_which_anyone_may_close_the_auction*,"new_minimum_bid":"*optional_updated_minimum_accepted_bid_in_smallest_denomination_of_bid_token*"}}' --from *your_key_alias_or_addr* --gas 2000000 -y
 ```
 Before the `ends_at` time is reached, only the auction creator can finalize an auction.  At that time or later, anyone may finalize the auction.  Even after the `ends_at` time is reached, bids will be accepted until the auction closes.
 
-The boolean only\_if\_bids parameter is used to prevent the auction from closing if there are no active bids.  If there are no active bids, but only\_if\_bids was set to false, then the auction will be closed, and all consigned tokens will be returned to the auction creator.
-If there is at least one active bid, the highest bid will be accepted (if tied, the tying bid placed earlier will be accepted).  The auction will then swap the tokens between the auction creator and the highest bidder, and return all the non-winning bids to their respective bidders.
+The optional parameters `new_ends_at` and `new_minimum_bid` will only be accepted if the auction creator is closing the auction.  They are used by the auction creator to keep an auction open if there are no bids, and in that case the closing time and/or minimum bid will be updated to the specified value(s).  If these parameters are not specified, the auction will be closed regardless of the existence of bids.
+
+If there were no bids when an auction closes, all consigned tokens will be returned to the auction creator.  If there is at least one active bid, the auction will be closed regardless of whether the `new_ends_at` and/or `new_minimum_bid` parameters are used.  In that case, the highest bid will be accepted (if tied, the tying bid placed earlier will be accepted).  The auction will then swap the tokens between the auction creator and the highest bidder, and return all the non-winning bids to their respective bidders.
 
 ## Returning Funds In The Event Of Error
 In the unlikely event of some unforeseen error that results in funds being held by an auction after it has closed, anyone may run
@@ -86,11 +87,11 @@ Return_all may only be called after an auction is closed.  Auction\_info will in
 ## View Lists of Active/Closed Auctions
 You may view the list of active auctions sorted by pair with
 ```sh
-secretcli q compute query secret1lgl96rs8lcpryc77kmw9x9lmwet48hyzdvhamn '{"list_active_auctions":{}}'
+secretcli q compute query secret16qfc24c2qcdl8s6lkgdp9d08xn778hx9tc6j3p '{"list_active_auctions":{}}'
 ```
 You may view the list of closed auctions in reverse chronological order with
 ```sh
-secretcli q compute query secret1lgl96rs8lcpryc77kmw9x9lmwet48hyzdvhamn '{"list_closed_auctions":{"before":*optional_u64_timestamp*,"page_size":*optional_u32_number_to_list*}}'
+secretcli q compute query secret16qfc24c2qcdl8s6lkgdp9d08xn778hx9tc6j3p '{"list_closed_auctions":{"before":*optional_u64_timestamp*,"page_size":*optional_u32_number_to_list*}}'
 ```
 If you do not supply the `before` field, it will start with the most recently closed auction, otherwise it will only display auctions that had closed before the provided timestamp.  The timestamp is in the number of seconds since epoch time (01/01/1970).  If you do not supply the `page_size` field, it will default to listing up to 200 closed auctions, otherwise it will display up to the number specifed as `page_size`.
 
@@ -99,7 +100,7 @@ If you are paginating your list, you would take the timestamp of the last auctio
 ## View List of Your Auctions
 You may view the lists of auctions that you have created, in which you have an active bid, or you have won with
 ```sh
-secretcli q compute query secret1lgl96rs8lcpryc77kmw9x9lmwet48hyzdvhamn '{"list_my_auctions":{"address":"*address_whose_auctions_to_list*","viewing_key":"*viewing_key*","filter":"*optional choice of active, closed, or all*"}}'
+secretcli q compute query secret16qfc24c2qcdl8s6lkgdp9d08xn778hx9tc6j3p '{"list_my_auctions":{"address":"*address_whose_auctions_to_list*","viewing_key":"*viewing_key*","filter":"*optional choice of active, closed, or all*"}}'
 ```
 To view your own auctions, you will need to have created a viewing key with the factory contract.  The `filter` field is an optional field that can be "active", "closed", or "all", to list only active , closed, or all your auctions respectively.  If you do not specify a filter, it will list all your auctions.
 

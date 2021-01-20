@@ -89,6 +89,18 @@
               ],
               "format": "uint64",
               "minimum": 0.0
+            },
+            "new_minimum_bid": {
+              "description": "optional minimum bid update if there are no bids",
+              "default": null,
+              "anyOf": [
+                {
+                  "$ref": "#/definitions/Uint128"
+                },
+                {
+                  "type": "null"
+                }
+              ]
             }
           }
         }

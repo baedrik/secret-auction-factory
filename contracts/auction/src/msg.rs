@@ -73,6 +73,9 @@ pub enum HandleMsg {
         /// seconds since epoch 01/01/1970
         #[serde(default)]
         new_ends_at: Option<u64>,
+        /// optional minimum bid update if there are no bids
+        #[serde(default)]
+        new_minimum_bid: Option<Uint128>,
     },
 
     /// If the auction holds any funds after it has closed (should never happen), this will return
