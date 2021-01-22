@@ -840,11 +840,15 @@ fn try_finalize<S: Storage, A: Api, Q: Querier>(
 /// * `msg` - QueryMsg passed in with the query call
 pub fn query<S: Storage, A: Api, Q: Querier>(deps: &Extern<S, A, Q>, msg: QueryMsg) -> QueryResult {
     let response = match msg {
-        QueryMsg::AuctionInfo { .. } => try_query_info(deps),
+        QueryMsg::AuctionInfo {} => try_query_info(deps),
         QueryMsg::ViewBid {
             address,
             viewing_key,
         } => try_view_bid(deps, &address, viewing_key),
+        QueryMsg::HasBids {
+            address,
+            viewing_key,
+        } => try_has_bids(deps, &address, viewing_key),
     };
     pad_query_result(response, BLOCK_SIZE)
 }
@@ -927,7 +931,6 @@ fn try_view_bid<S: Storage, A: Api, Q: Querier>(
         address: bidder.clone(),
         viewing_key: key,
     };
-    let decimals = state.bid_decimals;
     let key_valid_response: IsKeyValidWrapper = key_valid_msg.query(
         &deps.querier,
         state.factory.code_hash,
@@ -936,6 +939,7 @@ fn try_view_bid<S: Storage, A: Api, Q: Querier>(
 
     // if authenticated
     if key_valid_response.is_key_valid.is_valid {
+        let decimals = state.bid_decimals;
         let bidder_raw = &deps.api.canonical_address(bidder)?;
         let mut amount_bid: Option<Uint128> = None;
         let mut message = String::new();
@@ -970,6 +974,42 @@ fn try_view_bid<S: Storage, A: Api, Q: Querier>(
 
     to_binary(&QueryAnswer::ViewingKeyError {
         error: "Wrong viewing key for this address or viewing key not set".to_string(),
+    })
+}
+
+/// Returns QueryResult displaying the presence of active bids
+///
+/// # Arguments
+///
+/// * `deps` - reference to Extern containing all the contract's external dependencies
+/// * `address` - a reference to the address claiming to be the seller
+/// * `viewing_key` - String holding the viewing key
+fn try_has_bids<S: Storage, A: Api, Q: Querier>(
+    deps: &Extern<S, A, Q>,
+    address: &HumanAddr,
+    viewing_key: String,
+) -> QueryResult {
+    let state: State = load(&deps.storage, CONFIG_KEY)?;
+    let key_valid_msg = FactoryQueryMsg::IsKeyValid {
+        address: address.clone(),
+        viewing_key,
+    };
+    let key_valid_response: IsKeyValidWrapper = key_valid_msg.query(
+        &deps.querier,
+        state.factory.code_hash,
+        state.factory.address,
+    )?;
+
+    // if authenticated
+    if state.seller == *address && key_valid_response.is_key_valid.is_valid {
+        return to_binary(&QueryAnswer::HasBids {
+            has_bids: !state.bidders.is_empty(),
+        });
+    }
+
+    to_binary(&QueryAnswer::ViewingKeyError {
+        error: "Address and/or viewing key does not match auction creator's information"
+            .to_string(),
     })
 }
 
@@ -2890,5 +2930,112 @@ mod tests {
         assert!(message.contains("Bid placed"));
         assert_eq!(amount_bid, Some(Uint128(100)));
         assert_eq!(bid_decimals, Some(8));
+    }
+
+    #[test]
+    fn test_query_has_bids() {
+        let (init_result, deps) = init_helper();
+        assert!(
+            init_result.is_ok(),
+            "Init failed: {}",
+            init_result.err().unwrap()
+        );
+
+        #[derive(Debug)]
+        struct MyMockQuerier {
+            pub is_valid: bool,
+        }
+        impl Querier for MyMockQuerier {
+            fn raw_query(&self, _request: &[u8]) -> QuerierResult {
+                Ok(to_binary(&IsKeyValidWrapper {
+                    is_key_valid: IsKeyValid {
+                        is_valid: self.is_valid,
+                    },
+                }))
+            }
+        }
+        let invalid_deps = deps.change_querier(|_| MyMockQuerier { is_valid: false });
+        // try wrong key
+        let query_msg = QueryMsg::HasBids {
+            address: HumanAddr("alice".to_string()),
+            viewing_key: "wrong_key".to_string(),
+        };
+        let query_result = query(&invalid_deps, query_msg);
+        let error = extract_error_msg(query_result);
+        assert!(error
+            .contains("Address and/or viewing key does not match auction creator's information"));
+
+        let (init_result, deps) = init_helper();
+        assert!(
+            init_result.is_ok(),
+            "Init failed: {}",
+            init_result.err().unwrap()
+        );
+        let valid_deps = deps.change_querier(|_| MyMockQuerier { is_valid: true });
+        // try not seller
+        let query_msg = QueryMsg::HasBids {
+            address: HumanAddr("bob".to_string()),
+            viewing_key: "key".to_string(),
+        };
+        let query_result = query(&valid_deps, query_msg);
+        let error = extract_error_msg(query_result);
+        assert!(error
+            .contains("Address and/or viewing key does not match auction creator's information"));
+
+        // sanity check, no bids
+        let (init_result, deps) = init_helper();
+        assert!(
+            init_result.is_ok(),
+            "Init failed: {}",
+            init_result.err().unwrap()
+        );
+        let mut valid_deps = deps.change_querier(|_| MyMockQuerier { is_valid: true });
+        let query_msg = QueryMsg::HasBids {
+            address: HumanAddr("alice".to_string()),
+            viewing_key: "key".to_string(),
+        };
+        let query_result = query(&valid_deps, query_msg);
+        let has_bids = match from_binary(&query_result.unwrap()).unwrap() {
+            QueryAnswer::HasBids { has_bids, .. } => has_bids,
+            _ => panic!("Unexpected"),
+        };
+        assert!(!has_bids);
+
+        // sanity check, with bids
+        let handle_msg = HandleMsg::Receive {
+            sender: HumanAddr("blah".to_string()),
+            from: HumanAddr("bob".to_string()),
+            amount: Uint128(100),
+            msg: None,
+        };
+        let _handle_result = handle(&mut valid_deps, mock_env("bidaddr", &[]), handle_msg);
+        let query_msg = QueryMsg::HasBids {
+            address: HumanAddr("alice".to_string()),
+            viewing_key: "key".to_string(),
+        };
+        let query_result = query(&valid_deps, query_msg);
+        let has_bids = match from_binary(&query_result.unwrap()).unwrap() {
+            QueryAnswer::HasBids { has_bids, .. } => has_bids,
+            _ => panic!("Unexpected"),
+        };
+        assert!(has_bids);
+
+        let handle_msg = HandleMsg::Receive {
+            sender: HumanAddr("blah".to_string()),
+            from: HumanAddr("charlie".to_string()),
+            amount: Uint128(100),
+            msg: None,
+        };
+        let _handle_result = handle(&mut valid_deps, mock_env("bidaddr", &[]), handle_msg);
+        let query_msg = QueryMsg::HasBids {
+            address: HumanAddr("alice".to_string()),
+            viewing_key: "key".to_string(),
+        };
+        let query_result = query(&valid_deps, query_msg);
+        let has_bids = match from_binary(&query_result.unwrap()).unwrap() {
+            QueryAnswer::HasBids { has_bids, .. } => has_bids,
+            _ => panic!("Unexpected"),
+        };
+        assert!(has_bids);
     }
 }

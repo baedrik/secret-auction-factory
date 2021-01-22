@@ -30,9 +30,45 @@
           ],
           "properties": {
             "address": {
-              "$ref": "#/definitions/HumanAddr"
+              "description": "address whose bid should be displayed",
+              "allOf": [
+                {
+                  "$ref": "#/definitions/HumanAddr"
+                }
+              ]
             },
             "viewing_key": {
+              "description": "bidder's viewing key",
+              "type": "string"
+            }
+          }
+        }
+      }
+    },
+    {
+      "description": "returns boolean indicating whether there are any active bids",
+      "type": "object",
+      "required": [
+        "has_bids"
+      ],
+      "properties": {
+        "has_bids": {
+          "type": "object",
+          "required": [
+            "address",
+            "viewing_key"
+          ],
+          "properties": {
+            "address": {
+              "description": "address to authenticate as the auction seller",
+              "allOf": [
+                {
+                  "$ref": "#/definitions/HumanAddr"
+                }
+              ]
+            },
+            "viewing_key": {
+              "description": "seller's viewing key",
               "type": "string"
             }
           }

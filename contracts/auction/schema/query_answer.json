@@ -143,6 +143,26 @@
       }
     },
     {
+      "description": "response indicating whether there any active bids",
+      "type": "object",
+      "required": [
+        "has_bids"
+      ],
+      "properties": {
+        "has_bids": {
+          "type": "object",
+          "required": [
+            "has_bids"
+          ],
+          "properties": {
+            "has_bids": {
+              "type": "boolean"
+            }
+          }
+        }
+      }
+    },
+    {
       "description": "Viewing Key Error",
       "type": "object",
       "required": [

@@ -100,7 +100,16 @@ pub enum QueryMsg {
     AuctionInfo {},
     /// View active bid for input address
     ViewBid {
+        /// address whose bid should be displayed
         address: HumanAddr,
+        /// bidder's viewing key
+        viewing_key: String,
+    },
+    /// returns boolean indicating whether there are any active bids
+    HasBids {
+        /// address to authenticate as the auction seller
+        address: HumanAddr,
+        /// seller's viewing key
         viewing_key: String,
     },
 }
@@ -147,6 +156,8 @@ pub enum QueryAnswer {
         #[serde(skip_serializing_if = "Option::is_none")]
         bid_decimals: Option<u8>,
     },
+    /// response indicating whether there any active bids
+    HasBids { has_bids: bool },
     /// Viewing Key Error
     ViewingKeyError { error: String },
 }
