@@ -128,6 +128,7 @@
         "close_auction": {
           "type": "object",
           "required": [
+            "index",
             "seller"
           ],
           "properties": {
@@ -142,6 +143,12 @@
                   "type": "null"
                 }
               ]
+            },
+            "index": {
+              "description": "auction index",
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 0.0
             },
             "seller": {
               "description": "auction seller",
@@ -177,11 +184,23 @@
         "register_bidder": {
           "type": "object",
           "required": [
-            "bidder"
+            "bidder",
+            "index"
           ],
           "properties": {
             "bidder": {
-              "$ref": "#/definitions/HumanAddr"
+              "description": "bidder's address",
+              "allOf": [
+                {
+                  "$ref": "#/definitions/HumanAddr"
+                }
+              ]
+            },
+            "index": {
+              "description": "auction index",
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 0.0
             }
           }
         }
@@ -197,11 +216,23 @@
         "remove_bidder": {
           "type": "object",
           "required": [
-            "bidder"
+            "bidder",
+            "index"
           ],
           "properties": {
             "bidder": {
-              "$ref": "#/definitions/HumanAddr"
+              "description": "bidder's address",
+              "allOf": [
+                {
+                  "$ref": "#/definitions/HumanAddr"
+                }
+              ]
+            },
+            "index": {
+              "description": "auction index",
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 0.0
             }
           }
         }
@@ -302,6 +333,9 @@
       "properties": {
         "change_auction_info": {
           "type": "object",
+          "required": [
+            "index"
+          ],
           "properties": {
             "ends_at": {
               "description": "optional new closing time in seconds since epoch 01/01/1970",
@@ -311,6 +345,12 @@
                 "null"
               ],
               "format": "uint64",
+              "minimum": 0.0
+            },
+            "index": {
+              "description": "auction index",
+              "type": "integer",
+              "format": "uint32",
               "minimum": 0.0
             },
             "minimum_bid": {
@@ -382,6 +422,7 @@
       "required": [
         "bid_symbol",
         "ends_at",
+        "index",
         "label",
         "minimum_bid",
         "sell_amount",
@@ -398,6 +439,12 @@
           "description": "timestamp after which anyone may close the auction. Timestamp is in seconds since epoch 01/01/1970",
           "type": "integer",
           "format": "uint64",
+          "minimum": 0.0
+        },
+        "index": {
+          "description": "auction index with the factory",
+          "type": "integer",
+          "format": "uint32",
           "minimum": 0.0
         },
         "label": {

@@ -224,6 +224,15 @@
           "format": "uint8",
           "minimum": 0.0
         },
+        "index": {
+          "description": "index in closed auction list",
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint32",
+          "minimum": 0.0
+        },
         "label": {
           "description": "auction label",
           "type": "string"

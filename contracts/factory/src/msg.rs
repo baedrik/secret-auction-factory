@@ -1,7 +1,7 @@
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
-use cosmwasm_std::{HumanAddr, Uint128};
+use cosmwasm_std::{CanonicalAddr, HumanAddr, Uint128};
 
 /// Instantiation message
 #[derive(Serialize, Deserialize, JsonSchema)]
@@ -55,6 +55,8 @@ pub enum HandleMsg {
     ///
     /// Only auctions will use this function
     CloseAuction {
+        /// auction index
+        index: u32,
         /// auction seller
         seller: HumanAddr,
         /// winning bidder if the auction ended in a swap
@@ -69,12 +71,22 @@ pub enum HandleMsg {
     /// list of auctions, as well a create a viewing key for the auction if one was set
     ///
     /// Only auctions will use this function    
-    RegisterBidder { bidder: HumanAddr },
+    RegisterBidder {
+        /// auction index
+        index: u32,
+        /// bidder's address        
+        bidder: HumanAddr,
+    },
 
     /// RemoveBidder allows the factory to know a bidder retracted his bid from an auction
     ///
     /// Only auctions will use this function    
-    RemoveBidder { bidder: HumanAddr },
+    RemoveBidder {
+        /// auction index
+        index: u32,
+        /// bidder's address        
+        bidder: HumanAddr,
+    },
 
     /// Allows the admin to add a new auction contract version
     NewAuctionContract {
@@ -98,6 +110,8 @@ pub enum HandleMsg {
     ///
     /// Only auctions will call this function
     ChangeAuctionInfo {
+        /// auction index
+        index: u32,
         /// optional new closing time in seconds since epoch 01/01/1970
         #[serde(default)]
         ends_at: Option<u64>,
@@ -123,17 +137,15 @@ pub enum QueryMsg {
     },
     /// lists all active auctions sorted by pair
     ListActiveAuctions {},
-    /// lists closed auctions in reverse chronological order.  If you specify page size, it return
-    /// only that number of auctions (default is 200).  If you specify the before timestamp, it will
-    /// start listing from the first auction that closed before the timestamp (in number of seconds
-    /// since epoch 01/01/1970).  If you are paginating, you would take the timestamp of the last
-    /// auction you receive, and specify that as the before timestamp on your next query so it will
-    /// continue where it left off
+    /// lists closed auctions in reverse chronological order.  If you specify page size, it returns
+    /// only that number of auctions (default is 200).  If you specify the before parameter, it will
+    /// start listing from the first auction whose index is less than "before".  If you are
+    /// paginating, you would take the index of the last auction you receive, and specify that as the
+    /// before parameter on your next query so it will continue where it left off
     ListClosedAuctions {
-        /// optionally only show auctions that closed before this timestamp (number of seconds from
-        /// epoch 01/01/1970)
+        /// optionally only show auctions with index less than specified value
         #[serde(default)]
-        before: Option<u64>,
+        before: Option<u32>,
         /// optional number of auctions to return
         #[serde(default)]
         page_size: Option<u32>,
@@ -287,6 +299,8 @@ pub struct AuctionInfo {
 /// active auction info for storage
 #[derive(Serialize, Deserialize, JsonSchema, Debug)]
 pub struct RegisterAuctionInfo {
+    /// auction index with the factory
+    pub index: u32,
     /// auction label
     pub label: String,
     /// sell symbol index
@@ -304,8 +318,9 @@ pub struct RegisterAuctionInfo {
 
 impl RegisterAuctionInfo {
     /// takes the register auction information and creates a store auction info struct
-    pub fn to_store_auction_info(&self) -> StoreAuctionInfo {
+    pub fn to_store_auction_info(&self, address: CanonicalAddr) -> StoreAuctionInfo {
         StoreAuctionInfo {
+            address,
             label: self.label.clone(),
             sell_symbol: self.sell_symbol,
             bid_symbol: self.bid_symbol,
@@ -319,6 +334,8 @@ impl RegisterAuctionInfo {
 /// active auction info for storage
 #[derive(Serialize, Deserialize, JsonSchema, Debug)]
 pub struct StoreAuctionInfo {
+    /// auction address
+    pub address: CanonicalAddr,
     /// auction label
     pub label: String,
     /// sell symbol index
@@ -342,6 +359,7 @@ impl StoreAuctionInfo {
         timestamp: u64,
     ) -> StoreClosedAuctionInfo {
         StoreClosedAuctionInfo {
+            address: self.address.clone(),
             label: self.label.clone(),
             sell_symbol: self.sell_symbol,
             bid_symbol: self.bid_symbol,
@@ -355,6 +373,9 @@ impl StoreAuctionInfo {
 /// closed auction display info
 #[derive(Serialize, Deserialize, JsonSchema)]
 pub struct ClosedAuctionInfo {
+    /// index in closed auction list
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub index: Option<u32>,
     /// auction address
     pub address: HumanAddr,
     /// auction label
@@ -378,6 +399,8 @@ pub struct ClosedAuctionInfo {
 /// closed auction storage format
 #[derive(Serialize, Deserialize)]
 pub struct StoreClosedAuctionInfo {
+    /// auction address
+    pub address: CanonicalAddr,
     /// auction label
     pub label: String,
     /// sell symbol index

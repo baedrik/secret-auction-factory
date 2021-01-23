@@ -13,6 +13,8 @@ use crate::msg::ContractInfo;
 pub struct State {
     /// factory code hash and address
     pub factory: ContractInfo,
+    /// index of auction with the factory
+    pub index: u32,
     /// address of auction contract
     pub auction_addr: HumanAddr,
     /// address of auction owner

@@ -9,6 +9,7 @@
     "bid_symbol",
     "ends_at",
     "factory",
+    "index",
     "label",
     "minimum_bid",
     "sell_amount",
@@ -59,6 +60,12 @@
           "$ref": "#/definitions/ContractInfo"
         }
       ]
+    },
+    "index": {
+      "description": "auction index with the factory",
+      "type": "integer",
+      "format": "uint32",
+      "minimum": 0.0
     },
     "label": {
       "description": "String label for the auction",

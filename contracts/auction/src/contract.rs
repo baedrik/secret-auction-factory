@@ -30,6 +30,8 @@ pub const BLOCK_SIZE: usize = 256;
 /// auction info needed by factory
 #[derive(Serialize)]
 pub struct FactoryAuctionInfo {
+    /// auction index with the factory
+    pub index: u32,
     /// auction label
     pub label: String,
     /// sell symbol index
@@ -60,6 +62,8 @@ pub enum FactoryHandleMsg {
     },
     /// registers the closure of this auction with the factory
     CloseAuction {
+        /// auction index
+        index: u32,
         /// auction seller
         seller: HumanAddr,
         /// winning bidder if the auction ended in a swap
@@ -68,11 +72,23 @@ pub enum FactoryHandleMsg {
         winning_bid: Option<Uint128>,
     },
     /// registers a new bidder with the factory
-    RegisterBidder { bidder: HumanAddr },
+    RegisterBidder {
+        /// auction index
+        index: u32,
+        /// bidder's address
+        bidder: HumanAddr,
+    },
     /// tells factory the address is no longer a bidder in this auction
-    RemoveBidder { bidder: HumanAddr },
+    RemoveBidder {
+        /// auction index
+        index: u32,
+        /// bidder's address
+        bidder: HumanAddr,
+    },
     /// tells factory the closing time and/or minimum bid changed
     ChangeAuctionInfo {
+        /// auction index
+        index: u32,
         /// optional new ends_at time in seconds since epoch 01/01/1970
         ends_at: Option<u64>,
         /// optional new minimum bid
@@ -139,6 +155,7 @@ pub fn init<S: Storage, A: Api, Q: Querier>(
     }
     let state = State {
         factory: msg.factory.clone(),
+        index: msg.index,
         auction_addr: env.contract.address,
         seller: msg.seller.clone(),
         sell_contract: msg.sell_contract.clone(),
@@ -160,6 +177,7 @@ pub fn init<S: Storage, A: Api, Q: Querier>(
 
     let auction = FactoryAuctionInfo {
         label: msg.label,
+        index: msg.index,
         sell_symbol: msg.sell_symbol,
         bid_symbol: msg.bid_symbol,
         sell_amount: msg.sell_amount,
@@ -248,6 +266,7 @@ fn try_change_min_bid<S: Storage, A: Api, Q: Querier>(
     save(&mut deps.storage, CONFIG_KEY, &state)?;
     // register change with factory
     let change_min_msg = FactoryHandleMsg::ChangeAuctionInfo {
+        index: state.index,
         ends_at: None,
         minimum_bid: Some(minimum_bid),
     };
@@ -474,6 +493,7 @@ fn try_bid<S: Storage, A: Api, Q: Querier>(
         save(&mut deps.storage, CONFIG_KEY, &state)?;
         // register new bidder with the factory
         let reg_bid_msg = FactoryHandleMsg::RegisterBidder {
+            index: state.index,
             bidder: bidder.clone(),
         };
         // perform register bidder callback
@@ -551,7 +571,10 @@ fn try_retract<S: Storage, A: Api, Q: Querier>(
             log_msg.push_str("Bid retracted.  Tokens have been returned");
 
             // let factory know bid was retracted
-            let rem_bid_msg = FactoryHandleMsg::RemoveBidder { bidder };
+            let rem_bid_msg = FactoryHandleMsg::RemoveBidder {
+                index: state.index,
+                bidder,
+            };
             // perform callback
             cos_msg.push(rem_bid_msg.to_cosmos_msg(
                 state.factory.code_hash,
@@ -634,6 +657,7 @@ fn try_finalize<S: Storage, A: Api, Q: Querier>(
         save(&mut deps.storage, CONFIG_KEY, &state)?;
         // register change with factory
         let change_min_msg = FactoryHandleMsg::ChangeAuctionInfo {
+            index: state.index,
             ends_at: new_ends_at,
             minimum_bid: new_minimum_bid,
         };
@@ -775,6 +799,7 @@ fn try_finalize<S: Storage, A: Api, Q: Querier>(
         update_state = true;
         // let factory know
         let close_msg = FactoryHandleMsg::CloseAuction {
+            index: state.index,
             seller: state.seller.clone(),
             bidder: winner,
             winning_bid: winning_amount,
@@ -1043,6 +1068,7 @@ mod tests {
         };
         let init_msg = InitMsg {
             factory,
+            index: 0,
             label: "auction".to_string(),
             sell_symbol: 0,
             sell_decimals: 4,

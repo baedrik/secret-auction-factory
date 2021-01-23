@@ -12,22 +12,24 @@ use crate::contract::BLOCK_SIZE;
 pub struct InitMsg {
     /// factory contract code hash and address
     pub factory: ContractInfo,
+    /// auction index with the factory
+    pub index: u32,
     /// String label for the auction
     pub label: String,
-    /// sell symbol index
-    pub sell_symbol: u16,
-    /// sell token decimal places
-    pub sell_decimals: u8,
-    /// bid symbol index
-    pub bid_symbol: u16,
-    /// bid token decimal places,
-    pub bid_decimals: u8,
     /// auction seller
     pub seller: HumanAddr,
     /// sell contract code hash and address
     pub sell_contract: ContractInfo,
+    /// sell symbol index
+    pub sell_symbol: u16,
+    /// sell token decimal places
+    pub sell_decimals: u8,
     /// bid contract code hash and address
     pub bid_contract: ContractInfo,
+    /// bid symbol index
+    pub bid_symbol: u16,
+    /// bid token decimal places,
+    pub bid_decimals: u8,
     /// amount of tokens being sold
     pub sell_amount: Uint128,
     /// minimum bid that will be accepted

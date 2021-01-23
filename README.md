@@ -6,13 +6,13 @@ Although the original auction contract will no longer be updated, the repo will 
 ## Creating a New Auction
 First you must give the factory an allowance to consign the tokens for sale to the new auction's escrow:
 ```sh
-secretcli tx compute execute *sale_tokens_contract_address* '{"increase_allowance":{"spender":"secret1af7gp8qk94q4en84zk7gukpr546j0zhpgkgj5w","amount":"*amount_being_sold_in_smallest_denomination_of_sale_token*"}}' --from *your_key_alias_or_addr* --gas 150000 -y
+secretcli tx compute execute *sale_tokens_contract_address* '{"increase_allowance":{"spender":"secret10fgw2y8y9jmhvauquf9gcxue929ta8xdylpaq4","amount":"*amount_being_sold_in_smallest_denomination_of_sale_token*"}}' --from *your_key_alias_or_addr* --gas 150000 -y
 ```
 Granting allowance does not send any tokens, it only gives the factory permission to send tokens on your behalf. If for some reason after performing the above command you decide not to proceed with creating the auction, you may revoke that permission by using the `decrease_allowance` command. `decrease_allowance` follows the exact same input format as the above command.
 
 Then you can create the auction with:
 ```sh
-secretcli tx compute execute --label 663dot2 '{"create_auction":{"label":"*your_auction_name*","sell_contract":{"code_hash":"*sale_tokens_code_hash*","address":"*sale_tokens_contract_address*"},"bid_contract":{"code_hash":"*bid_tokens_code_hash*","address":"*bid_tokens_contract_address*"},"sell_amount":"*amount_being_sold_in_smallest_denomination_of_sale_token*","minimum_bid":"*minimum_accepted_bid_in_smallest_denomination_of_bid_token*","ends_at":*seconds_since_epoch_after_which_anyone_may_close_the_auction*,"description":"*optional_text_description*"}}' --from *your_key_alias_or_addr* --gas 600000 -y
+secretcli tx compute execute --label 777dot1 '{"create_auction":{"label":"*your_auction_name*","sell_contract":{"code_hash":"*sale_tokens_code_hash*","address":"*sale_tokens_contract_address*"},"bid_contract":{"code_hash":"*bid_tokens_code_hash*","address":"*bid_tokens_contract_address*"},"sell_amount":"*amount_being_sold_in_smallest_denomination_of_sale_token*","minimum_bid":"*minimum_accepted_bid_in_smallest_denomination_of_bid_token*","ends_at":*seconds_since_epoch_after_which_anyone_may_close_the_auction*,"description":"*optional_text_description*"}}' --from *your_key_alias_or_addr* --gas 600000 -y
 ```
 You can find a contract's code hash with
 ```sh
@@ -40,18 +40,18 @@ The new minimum bid will only apply to newly placed bids.  Any bids that were va
 ## Create a Viewing Key
 You can have the factory generate a new viewing key with:
 ``` sh
-secretcli tx compute execute --label 663dot2 '{"create_viewing_key":{"entropy":"*Some arbitrary string used as entropy in generating the random viewing key*"}}' --from *your_key_alias_or_addr* --gas 120000 -y
+secretcli tx compute execute --label 777dot1 '{"create_viewing_key":{"entropy":"*Some arbitrary string used as entropy in generating the random viewing key*"}}' --from *your_key_alias_or_addr* --gas 110000 -y
 ```
 or you can set the viewing key with
 ``` sh
-secretcli tx compute execute --label 663dot2 '{"set_viewing_key":{"key":"*The viewing key you want*","padding":"Optional string used to pad the message length so it does not leak the length of the key"}}' --from *your_key_alias_or_addr* --gas 120000 -y
+secretcli tx compute execute --label 777dot1 '{"set_viewing_key":{"key":"*The viewing key you want*","padding":"Optional string used to pad the message length so it does not leak the length of the key"}}' --from *your_key_alias_or_addr* --gas 110000 -y
 ```
 A viewing key allows you to query the factory contract for a list of only the auctions you have interacted with.  It also allows you to view your bid information by querying the individual auctions.  It is recommended to use `create_viewing_key` to set your viewing key instead of using `set_viewing_key` because `create_viewing_key` will generate a complex key, whereas `set_viewing_key` will just accept whatever key it is given.  `set_viewing_key` is provided if a UI would like to generate the viewing key itself.  If you are developing a UI and are using `set_viewing_key`, also use the `padding` field so that the length of the message does not leak information about the length of the viewing key.
 
 ## Placing Bids
 To place a bid, the bidder should Send the tokens to the individual auction contract address with
 ```sh
-secretcli tx compute execute *bid_tokens_contract_address* '{"send": {"recipient": "*auction_contract_address*", "amount": "*bid_amount_in_smallest_denomination_of_bidding_token*"}}' --from *your_key_alias_or_addr* --gas 300000 -y
+secretcli tx compute execute *bid_tokens_contract_address* '{"send": {"recipient": "*auction_contract_address*", "amount": "*bid_amount_in_smallest_denomination_of_bidding_token*"}}' --from *your_key_alias_or_addr* --gas 330000 -y
 ```
 The tokens bid will be placed in escrow until the auction has concluded or you call retract\_bid to retract your bid and have all tokens returned.  You may retract your bid at any time before the auction ends. You may only have one active bid at a time.  If you place more than one bid, the smallest bid will be returned to you, because obviously that bid will lose to your new bid if they both stayed active.  If you bid the same amount as your previous bid, it will retain your original bid's timestamp, because, in the event of ties, the bid placed earlier is deemed the winner.  If you place a bid that is less than the minimum bid, those tokens will be immediately returned to you.  Also, if you place a bid after the auction has closed, those tokens will be immediately returned.
 
@@ -87,20 +87,20 @@ Return_all may only be called after an auction is closed.  Auction\_info will in
 ## View Lists of Active/Closed Auctions
 You may view the list of active auctions sorted by pair with
 ```sh
-secretcli q compute query secret1af7gp8qk94q4en84zk7gukpr546j0zhpgkgj5w '{"list_active_auctions":{}}'
+secretcli q compute query secret10fgw2y8y9jmhvauquf9gcxue929ta8xdylpaq4 '{"list_active_auctions":{}}'
 ```
 You may view the list of closed auctions in reverse chronological order with
 ```sh
-secretcli q compute query secret1af7gp8qk94q4en84zk7gukpr546j0zhpgkgj5w '{"list_closed_auctions":{"before":*optional_u64_timestamp*,"page_size":*optional_u32_number_to_list*}}'
+secretcli q compute query secret10fgw2y8y9jmhvauquf9gcxue929ta8xdylpaq4 '{"list_closed_auctions":{"before":*optional_u32_index*,"page_size":*optional_u32_number_to_list*}}'
 ```
-If you do not supply the `before` field, it will start with the most recently closed auction, otherwise it will only display auctions that had closed before the provided timestamp.  The timestamp is in the number of seconds since epoch time (01/01/1970).  If you do not supply the `page_size` field, it will default to listing up to 200 closed auctions, otherwise it will display up to the number specifed as `page_size`.
+If you do not supply the `before` field, it will start with the most recently closed auction, otherwise it will begin displaying the auction with the index (before-1).  If you do not supply the `page_size` field, it will default to listing up to 200 closed auctions, otherwise it will display up to the number specifed as `page_size`.
 
-If you are paginating your list, you would take the timestamp of the last auction returned, and specify that in the `before` field of the next query in order to have the subsequent query start where the last one left off.
+If you are paginating your list, you would take the index of the last auction returned, and specify that in the `before` field of the next query in order to have the subsequent query start where the last one left off.
 
 ## View List of Your Auctions
 You may view the lists of auctions that you have created, in which you have an active bid, or you have won with
 ```sh
-secretcli q compute query secret1af7gp8qk94q4en84zk7gukpr546j0zhpgkgj5w '{"list_my_auctions":{"address":"*address_whose_auctions_to_list*","viewing_key":"*viewing_key*","filter":"*optional choice of active, closed, or all*"}}'
+secretcli q compute query secret10fgw2y8y9jmhvauquf9gcxue929ta8xdylpaq4 '{"list_my_auctions":{"address":"*address_whose_auctions_to_list*","viewing_key":"*viewing_key*","filter":"*optional choice of active, closed, or all*"}}'
 ```
 To view your own auctions, you will need to have created a viewing key with the factory contract.  The `filter` field is an optional field that can be "active", "closed", or "all", to list only active , closed, or all your auctions respectively.  If you do not specify a filter, it will list all your auctions.
 
@@ -136,6 +136,6 @@ It would be preferred if the UI performed the allowance-granting step and the cr
 
 Don't forget that secret contracts can not use floating points, so any time a token/auction has an amount input/output, it is an integer in the smallest denomination of the token.  Therefore it is up to the UI to convert input/output amounts from/to their decimal equivalent to make things more convenient for the user.  So if your UI accepts a decimal input from the user, it will need to multiply the input by 10^number_of_decimals before creating the execute commands.  That means that when creating a new auction, your UI will need to query the input sell and bid contract addresses to find out how many decimal places they use so that it can translate the sell_amount and minimum_bid to the integer form that the auction and token contracts use.  When placing a bid, if your UI is already pulling the auction_info data when it displays the auction the user wants to bid in, you can just pull the decimal places from the auction_info query instead of needing to query the individual token contracts.  The same applies to responses the UI receives from the auction.  Any amounts will need to be divided by 10^n_decimals if you are going to display amounts in decimal values of whole tokens.  Again, since the UI will likely have already called the auction_info query to display it before the user interacts with the auction, it can store the number of decimals from the auction_info query to use later in translating the response.  When displaying lists of active/closed auctions, the factory will supply the number of decimals (in fields called `sell_decimals` and `bid_decimals`) so that the UI doesn't have to query every auction in the list.
 
-If you are paginating your list of closed auctions, you would take the timestamp of the last auction returned, and specify that in the `before` field of the next query in order to have the subsequent query start where the last one left off.
+If you are paginating your list of closed auctions, you would take the index of the last auction returned, and specify that in the `before` field of the next query in order to have the subsequent query start where the last one left off.
 
 Also, you should be aware that responses from bidding and consigning (functions that are called indirectly when doing a Send tx with a token contract) are sent in the log attributes.  Also, the address of a newly created auction is returned in a log attribute.  This is because when one contract calls another contract, only logs (not the data field) are forwarded back to the user.  On the other hand, any time you call a contract directly that does not need to call another contract (or that can ignore the other contract's response), the response will be sent in the data field, which is the preferred method of returning json responses.

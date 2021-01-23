@@ -8,10 +8,11 @@ use cosmwasm_std::{
 
 use cosmwasm_storage::{PrefixedStorage, ReadonlyPrefixedStorage};
 
-use std::collections::{BTreeMap, HashMap, HashSet};
+use std::collections::{HashMap, HashSet};
 
 use secret_toolkit::{
     snip20::{send_from_msg, token_info_query},
+    storage::{AppendStore, AppendStoreMut},
     utils::{pad_handle_result, pad_query_result, InitCallback},
 };
 
@@ -48,14 +49,14 @@ pub const STATUS_KEY: &[u8] = b"status";
 pub const VERSION_KEY: &[u8] = b"version";
 /// storage key for the active auction list
 pub const ACTIVE_KEY: &[u8] = b"active";
-/// storage key for the closed auction list
-pub const CLOSED_KEY: &[u8] = b"closed";
 /// storage key for token symbols and decimals
 pub const SYMDEC_KEY: &[u8] = b"symdec";
 /// storage key for token symbols/decimals map
 pub const SYMDEC_MAP_KEY: &[u8] = b"symdecmap";
 /// storage key for the label of the auction we just instantiated
 pub const PENDING_KEY: &[u8] = b"pending";
+/// storage key for the index to give the newest auction
+pub const INDEX_KEY: &[u8] = b"index";
 /// pad handle responses and log attributes to blocks of 256 bytes to prevent leaking info based on
 /// response size
 pub const BLOCK_SIZE: usize = 256;
@@ -77,10 +78,10 @@ pub fn init<S: Storage, A: Api, Q: Querier>(
 ) -> InitResult {
     let prng_seed: Vec<u8> = sha_256(base64::encode(msg.entropy).as_bytes()).to_vec();
     let version: AuctionContractInfo = msg.auction_contract;
-    let active: HashSet<Vec<u8>> = HashSet::new();
-    let closed: BTreeMap<u64, Vec<u8>> = BTreeMap::new();
+    let active: HashSet<u32> = HashSet::new();
     let symdec: Vec<TokenSymDec> = Vec::new();
     let symdecmap: HashMap<Vec<u8>, u16> = HashMap::new();
+    let index: u32 = 0;
     let stopped = false;
 
     save(&mut deps.storage, VERSION_KEY, &version)?;
@@ -88,9 +89,9 @@ pub fn init<S: Storage, A: Api, Q: Querier>(
     save(&mut deps.storage, STATUS_KEY, &stopped)?;
     save(&mut deps.storage, PRNG_SEED_KEY, &prng_seed)?;
     save(&mut deps.storage, ACTIVE_KEY, &active)?;
-    save(&mut deps.storage, CLOSED_KEY, &closed)?;
     save(&mut deps.storage, SYMDEC_KEY, &symdec)?;
     save(&mut deps.storage, SYMDEC_MAP_KEY, &symdecmap)?;
+    save(&mut deps.storage, INDEX_KEY, &index)?;
 
     Ok(InitResponse::default())
 }
@@ -133,13 +134,14 @@ pub fn handle<S: Storage, A: Api, Q: Querier>(
             auction,
             sell_contract,
         } => try_register_auction(deps, env, seller, &auction, sell_contract),
-        HandleMsg::RegisterBidder { bidder } => try_reg_bidder(deps, env, bidder),
-        HandleMsg::RemoveBidder { bidder } => try_remove_bidder(deps, env, &bidder),
+        HandleMsg::RegisterBidder { index, bidder } => try_reg_bidder(deps, env, index, bidder),
+        HandleMsg::RemoveBidder { index, bidder } => try_remove_bidder(deps, env, index, &bidder),
         HandleMsg::CloseAuction {
+            index,
             seller,
             bidder,
             winning_bid,
-        } => try_close_auction(deps, env, &seller, bidder.as_ref(), winning_bid),
+        } => try_close_auction(deps, env, index, &seller, bidder.as_ref(), winning_bid),
         HandleMsg::CreateViewingKey { entropy } => try_create_key(deps, env, &entropy),
         HandleMsg::SetViewingKey { key, .. } => try_set_key(deps, env, &key),
         HandleMsg::NewAuctionContract { auction_contract } => {
@@ -147,9 +149,10 @@ pub fn handle<S: Storage, A: Api, Q: Querier>(
         }
         HandleMsg::SetStatus { stop } => try_set_status(deps, env, stop),
         HandleMsg::ChangeAuctionInfo {
+            index,
             ends_at,
             minimum_bid,
-        } => try_change_auction_info(deps, env, ends_at, minimum_bid),
+        } => try_change_auction_info(deps, env, index, ends_at, minimum_bid),
     };
     pad_handle_result(response, BLOCK_SIZE)
 }
@@ -186,22 +189,24 @@ fn try_create_auction<S: Storage, A: Api, Q: Querier>(
     pub struct AuctionInitMsg {
         /// factory contract code hash and address
         pub factory: ContractInfo,
+        /// auction index with the factory
+        pub index: u32,
         /// String label for the auction
         pub label: String,
-        /// sell symbol index
-        pub sell_symbol: u16,
-        /// sell token decimal places
-        pub sell_decimals: u8,
-        /// bid symbol index
-        pub bid_symbol: u16,
-        /// bid token decimal places,
-        pub bid_decimals: u8,
         /// auction seller
         pub seller: HumanAddr,
         /// sell contract code hash and address
         pub sell_contract: ContractInfo,
+        /// sell symbol index
+        pub sell_symbol: u16,
+        /// sell token decimal places
+        pub sell_decimals: u8,
         /// bid contract code hash and address
         pub bid_contract: ContractInfo,
+        /// bid symbol index
+        pub bid_symbol: u16,
+        /// bid token decimal places,
+        pub bid_decimals: u8,
         /// amount of tokens being sold
         pub sell_amount: Uint128,
         /// minimum bid that will be accepted
@@ -292,23 +297,30 @@ fn try_create_auction<S: Storage, A: Api, Q: Querier>(
 
     // get the current version of the auction contract's hash and code id
     let auction_info: AuctionContractInfo = load(&deps.storage, VERSION_KEY)?;
+    // get index for this auction and increment it
+    let mut index: u32 = load(&deps.storage, INDEX_KEY)?;
+    // save label and only register an auction giving the matching label
+    save(&mut deps.storage, PENDING_KEY, &label)?;
+
     let initmsg = AuctionInitMsg {
         factory,
+        index,
         label: label.clone(),
-        sell_symbol: sell_index,
-        sell_decimals,
-        bid_symbol: bid_index,
-        bid_decimals,
         seller: env.message.sender,
         sell_contract,
+        sell_symbol: sell_index,
+        sell_decimals,
         bid_contract,
+        bid_symbol: bid_index,
+        bid_decimals,
         sell_amount,
         minimum_bid,
         ends_at,
         description,
     };
-    // save label and only register an auction giving the matching label
-    save(&mut deps.storage, PENDING_KEY, &label)?;
+    // increment and save the index for the next auction
+    index += 1;
+    save(&mut deps.storage, INDEX_KEY, &index)?;
 
     let cosmosmsg =
         initmsg.to_cosmos_msg(label, auction_info.code_id, auction_info.code_hash, None)?;
@@ -352,25 +364,25 @@ fn try_register_auction<S: Storage, A: Api, Q: Querier>(
     remove(&mut deps.storage, PENDING_KEY);
 
     // convert register auction info to storage format
-    let auction = reg_auction.to_store_auction_info();
+    let auction_addr = deps.api.canonical_address(&env.message.sender)?;
+    let auction = reg_auction.to_store_auction_info(auction_addr);
 
-    // save the auction info keyed by its address
-    let auction_addr = &deps.api.canonical_address(&env.message.sender)?;
+    // save the auction info keyed by its index
     let mut info_store = PrefixedStorage::new(PREFIX_ACTIVE_INFO, &mut deps.storage);
-    save(&mut info_store, auction_addr.as_slice(), &auction)?;
+    save(&mut info_store, &reg_auction.index.to_le_bytes(), &auction)?;
 
     // add the auction address to list of active auctions
-    let mut active: HashSet<Vec<u8>> = load(&deps.storage, ACTIVE_KEY)?;
-    active.insert(auction_addr.as_slice().to_vec());
+    let mut active: HashSet<u32> = load(&deps.storage, ACTIVE_KEY)?;
+    active.insert(reg_auction.index);
     save(&mut deps.storage, ACTIVE_KEY, &active)?;
 
     // get list of seller's active auctions
     let seller_raw = &deps.api.canonical_address(&seller)?;
     let mut seller_store = PrefixedStorage::new(PREFIX_SELLERS_ACTIVE, &mut deps.storage);
-    let load_auctions: Option<HashSet<Vec<u8>>> = may_load(&seller_store, seller_raw.as_slice())?;
+    let load_auctions: Option<HashSet<u32>> = may_load(&seller_store, seller_raw.as_slice())?;
     let mut my_active = load_auctions.unwrap_or_default();
     // add this auction to seller's list
-    my_active.insert(auction_addr.as_slice().to_vec());
+    my_active.insert(reg_auction.index);
     save(&mut seller_store, seller_raw.as_slice(), &my_active)?;
 
     Ok(HandleResponse {
@@ -398,12 +410,14 @@ fn try_register_auction<S: Storage, A: Api, Q: Querier>(
 ///
 /// * `deps` - mutable reference to Extern containing all the contract's external dependencies
 /// * `env` - Env of contract's environment
+/// * `index` - auction index
 /// * `seller` - reference to the address of the auction's seller
 /// * `bidder` - reference to the auction's winner if it had one
 /// * `winning_bid` - auction's winning bid if it had one
 fn try_close_auction<S: Storage, A: Api, Q: Querier>(
     deps: &mut Extern<S, A, Q>,
     env: Env,
+    index: u32,
     seller: &HumanAddr,
     bidder: Option<&HumanAddr>,
     winning_bid: Option<Uint128>,
@@ -411,71 +425,38 @@ fn try_close_auction<S: Storage, A: Api, Q: Querier>(
     let auction_addr = &deps.api.canonical_address(&env.message.sender)?;
 
     // verify auction is in active list of auctions and not a spam attempt
-    let mut authenticator = AuthResult::authenticate_auction(&deps.storage, auction_addr)?;
-
-    let may_error = authenticator.error.take();
+    let (may_active, may_info, may_error) =
+        authenticate_auction(&deps.storage, auction_addr, index)?;
     if let Some(error) = may_error {
         return error;
     }
-
-    let mut active = authenticator.active.take().unwrap();
-
-    // remove the auction from the active list
-    active.remove(&auction_addr.as_slice().to_vec());
-    save(&mut deps.storage, ACTIVE_KEY, &active)?;
-
-    // get the auction information
-    let mut info_store = PrefixedStorage::new(PREFIX_ACTIVE_INFO, &mut deps.storage);
-    let load_auction_info: Option<StoreAuctionInfo> =
-        may_load(&info_store, auction_addr.as_slice())?;
-    if load_auction_info.is_none() {
-        return Ok(HandleResponse {
-            messages: vec![],
-            log: vec![
-                log(
-                    "Error",
-                    "Unable to register the closure with the factory contract.",
-                ),
-                log("Reason", "Missing auction information."),
-            ],
-            data: None,
-        });
-    }
     // delete the active auction info
-    info_store.remove(auction_addr.as_slice());
+    let mut info_store = PrefixedStorage::new(PREFIX_ACTIVE_INFO, &mut deps.storage);
+    info_store.remove(&index.to_le_bytes());
+    // remove the auction from the active list
+    let mut active = may_active.unwrap();
+    active.remove(&index);
+    save(&mut deps.storage, ACTIVE_KEY, &active)?;
 
     // set the closed auction info
     let timestamp = env.block.time;
-    let auction_info = load_auction_info.unwrap();
+    let auction_info = may_info.unwrap();
     let closed_info =
         auction_info.to_store_closed_auction_info(winning_bid.map(|n| n.u128()), timestamp);
     let mut closed_info_store = PrefixedStorage::new(PREFIX_CLOSED_INFO, &mut deps.storage);
-    save(
-        &mut closed_info_store,
-        auction_addr.as_slice(),
-        &closed_info,
-    )?;
-
-    // save auction to the closed list
-    let may_closed: Option<BTreeMap<u64, Vec<u8>>> = may_load(&deps.storage, CLOSED_KEY)?;
-    let mut closed = may_closed.unwrap_or_default();
-    closed.insert(timestamp, auction_addr.as_slice().to_vec());
-    save(&mut deps.storage, CLOSED_KEY, &closed)?;
+    let mut closed_store = AppendStoreMut::attach_or_create(&mut closed_info_store)?;
+    let closed_index = closed_store.len();
+    closed_store.push(&closed_info)?;
 
     // remove auction from seller's active list
     let seller_raw = &deps.api.canonical_address(seller)?;
-    remove_from_persons_active(
-        &mut deps.storage,
-        PREFIX_SELLERS_ACTIVE,
-        seller_raw,
-        auction_addr,
-    )?;
+    remove_from_persons_active(&mut deps.storage, PREFIX_SELLERS_ACTIVE, seller_raw, index)?;
     // add to seller's closed list
     add_to_persons_closed(
         &mut deps.storage,
         PREFIX_SELLERS_CLOSED,
         seller_raw,
-        auction_addr,
+        closed_index,
     )?;
 
     // if auction had a winner
@@ -486,7 +467,7 @@ fn try_close_auction<S: Storage, A: Api, Q: Querier>(
         let (win_active, _) = filter_only_active(&bidder_store, winner_raw, &mut active)?;
         save(&mut bidder_store, winner_raw.as_slice(), &win_active)?;
         // add to winner's closed list
-        add_to_persons_closed(&mut deps.storage, PREFIX_WINNERS, winner_raw, auction_addr)?;
+        add_to_persons_closed(&mut deps.storage, PREFIX_WINNERS, winner_raw, closed_index)?;
     }
 
     Ok(HandleResponse {
@@ -504,49 +485,37 @@ fn try_close_auction<S: Storage, A: Api, Q: Querier>(
 ///
 /// * `deps` - mutable reference to Extern containing all the contract's external dependencies
 /// * `env` - Env of contract's environment
+/// * `index` - auction index
 /// * `ends_at` - optional new closing time
 /// * `minimum_bid` - optional new minimum bid
 fn try_change_auction_info<S: Storage, A: Api, Q: Querier>(
     deps: &mut Extern<S, A, Q>,
     env: Env,
+    index: u32,
     ends_at: Option<u64>,
     minimum_bid: Option<Uint128>,
 ) -> HandleResult {
     let auction_addr = &deps.api.canonical_address(&env.message.sender)?;
 
     // verify auction is in active list of auctions and not a spam attempt
-    let mut authenticator = AuthResult::authenticate_auction(&deps.storage, auction_addr)?;
-
-    let may_error = authenticator.error.take();
+    let (_may_active, may_info, may_error) =
+        authenticate_auction(&deps.storage, auction_addr, index)?;
     if let Some(error) = may_error {
         return error;
     }
 
-    let mut info_store = PrefixedStorage::new(PREFIX_ACTIVE_INFO, &mut deps.storage);
-    let load_auction: Option<StoreAuctionInfo> = may_load(&info_store, auction_addr.as_slice())?;
-    if let Some(mut auction_info) = load_auction {
-        if let Some(min_bid) = minimum_bid {
-            auction_info.minimum_bid = min_bid.u128();
-        }
-        if let Some(ends) = ends_at {
-            auction_info.ends_at = ends;
-        }
-        save(&mut info_store, auction_addr.as_slice(), &auction_info)?;
-        return Ok(HandleResponse {
-            messages: vec![],
-            log: vec![],
-            data: None,
-        });
+    let mut auction_info = may_info.unwrap();
+    if let Some(min_bid) = minimum_bid {
+        auction_info.minimum_bid = min_bid.u128();
     }
+    if let Some(ends) = ends_at {
+        auction_info.ends_at = ends;
+    }
+    let mut info_store = PrefixedStorage::new(PREFIX_ACTIVE_INFO, &mut deps.storage);
+    save(&mut info_store, &index.to_le_bytes(), &auction_info)?;
     Ok(HandleResponse {
         messages: vec![],
-        log: vec![
-            log(
-                "Error",
-                "Unable to register the closing time/minimum bid change with the factory contract.",
-            ),
-            log("Reason", "Missing auction information."),
-        ],
+        log: vec![],
         data: None,
     })
 }
@@ -559,30 +528,31 @@ fn try_change_auction_info<S: Storage, A: Api, Q: Querier>(
 ///
 /// * `deps` - mutable reference to Extern containing all the contract's external dependencies
 /// * `env` - Env of contract's environment
+/// * `index` - auction index
 /// * `bidder` - address of the new bidder
 fn try_reg_bidder<S: Storage, A: Api, Q: Querier>(
     deps: &mut Extern<S, A, Q>,
     env: Env,
+    index: u32,
     bidder: HumanAddr,
 ) -> HandleResult {
     let auction_addr = &deps.api.canonical_address(&env.message.sender)?;
 
     // verify auction is in active list of auctions and not a spam attempt
-    let mut authenticator = AuthResult::authenticate_auction(&deps.storage, auction_addr)?;
-
-    let may_error = authenticator.error.take();
+    let (may_active, _may_info, may_error) =
+        authenticate_auction(&deps.storage, auction_addr, index)?;
     if let Some(error) = may_error {
         return error;
     }
 
-    let mut active = authenticator.active.take().unwrap();
+    let mut active = may_active.unwrap();
 
     // clean up the bidders list of active auctions
     let bidder_raw = &deps.api.canonical_address(&bidder)?;
     let mut bidder_store = PrefixedStorage::new(PREFIX_BIDDERS, &mut deps.storage);
     let (mut my_active, _) = filter_only_active(&bidder_store, bidder_raw, &mut active)?;
     // add this auction to the list
-    my_active.insert(auction_addr.as_slice().to_vec());
+    my_active.insert(index);
     save(&mut bidder_store, bidder_raw.as_slice(), &my_active)?;
 
     Ok(HandleResponse {
@@ -600,29 +570,31 @@ fn try_reg_bidder<S: Storage, A: Api, Q: Querier>(
 ///
 /// * `deps` - mutable reference to Extern containing all the contract's external dependencies
 /// * `env` - Env of contract's environment
+/// * `index` - auction index
 /// * `bidder` - reference to the address of the retracting bidder
 fn try_remove_bidder<S: Storage, A: Api, Q: Querier>(
     deps: &mut Extern<S, A, Q>,
     env: Env,
+    index: u32,
     bidder: &HumanAddr,
 ) -> HandleResult {
     let auction_addr = &deps.api.canonical_address(&env.message.sender)?;
-    // verify auction is in active list of auctions and not a spam attempt
-    let mut authenticator = AuthResult::authenticate_auction(&deps.storage, auction_addr)?;
 
-    // only exit if there is no active list.  Allow removing bidder from a closed auction
-    if authenticator.active.is_none() {
-        return authenticator.error.unwrap();
+    // verify auction is in active list of auctions and not a spam attempt
+    let (may_active, _may_info, may_error) =
+        authenticate_auction(&deps.storage, auction_addr, index)?;
+    if let Some(error) = may_error {
+        return error;
     }
 
-    let mut active = authenticator.active.take().unwrap();
+    let mut active = may_active.unwrap();
 
     // clean up the bidders list of active auctions
     let bidder_raw = &deps.api.canonical_address(&bidder)?;
     let mut bidder_store = PrefixedStorage::new(PREFIX_BIDDERS, &mut deps.storage);
     let (mut my_active, _) = filter_only_active(&bidder_store, bidder_raw, &mut active)?;
     // remove this auction from the list
-    my_active.remove(&auction_addr.as_slice().to_vec());
+    my_active.remove(&index);
     save(&mut bidder_store, bidder_raw.as_slice(), &my_active)?;
 
     Ok(HandleResponse {
@@ -632,63 +604,72 @@ fn try_remove_bidder<S: Storage, A: Api, Q: Querier>(
     })
 }
 
-/// used to authenticate that the caller of a function that is restricted to auctions is an
-/// auction the factory created
-pub struct AuthResult {
-    /// used to return the loaded list of active auctions
-    pub active: Option<HashSet<Vec<u8>>>,
-    /// possible error of failed authentication
-    pub error: Option<HandleResult>,
-}
-
-impl AuthResult {
-    /// Returns StdResult<Self>
-    ///
-    /// verifies that the auction is in the list of active auctions
-    ///
-    /// # Arguments
-    ///
-    /// * `storage` - a reference to contract's storage
-    /// * `auction` - a reference to the auction's address
-    pub fn authenticate_auction<S: Storage>(
-        storage: &S,
-        auction: &CanonicalAddr,
-    ) -> StdResult<Self> {
-        let error: Option<HandleResult>;
-        let active: Option<HashSet<Vec<u8>>>;
-        // verify auction is in active list of auctions and not a spam attempt
-        let load_active: Option<HashSet<Vec<u8>>> = may_load(storage, ACTIVE_KEY)?;
-        if let Some(active_set) = load_active {
-            if !active_set.contains(&auction.as_slice().to_vec()) {
+/// Returns StdResult<(Option<HashSet<u32>>, Option<StoreAuctionInfo>, Option<HandleResult>)>
+///
+/// verifies that the auction is in the list of active auctions, and returns the active auction
+/// list, the auction information, or a possible error
+///
+/// # Arguments
+///
+/// * `storage` - a reference to contract's storage
+/// * `auction` - a reference to the auction's address
+/// * `index` - index/key of the auction
+#[allow(clippy::type_complexity)]
+fn authenticate_auction<S: ReadonlyStorage>(
+    storage: &S,
+    auction: &CanonicalAddr,
+    index: u32,
+) -> StdResult<(
+    Option<HashSet<u32>>,
+    Option<StoreAuctionInfo>,
+    Option<HandleResult>,
+)> {
+    let mut error: Option<HandleResult> = None;
+    let mut info: Option<StoreAuctionInfo> = None;
+    let active: Option<HashSet<u32>> = may_load(storage, ACTIVE_KEY)?;
+    if let Some(active_set) = active.as_ref() {
+        // get the auction information
+        let info_store = ReadonlyPrefixedStorage::new(PREFIX_ACTIVE_INFO, storage);
+        info = may_load(&info_store, &index.to_le_bytes())?;
+        if let Some(auction_info) = info.as_ref() {
+            if auction_info.address != *auction || !active_set.contains(&index) {
                 error = Some(Ok(HandleResponse {
                     messages: vec![],
                     log: vec![log(
                         "Unauthorized",
-                        "You are not an active auction this factory created.",
+                        "You are not an active auction this factory created",
                     )],
                     data: None,
                 }));
-            } else {
-                error = None;
             }
-            active = Some(active_set);
-        // if you can't load the active auction list, it is an error but still the auction process
         } else {
             error = Some(Ok(HandleResponse {
                 messages: vec![],
                 log: vec![
                     log(
                         "Error",
-                        "Unable to register action with the factory contract.",
+                        "Unable to register action with the factory contract",
                     ),
-                    log("Reason", "Missing active auction list."),
+                    log("Reason", "Missing auction information"),
                 ],
                 data: None,
             }));
-            active = None;
         }
-        Ok(Self { active, error })
+    // if you can't load the active auction list, it is an error but still let auction process
+    } else {
+        error = Some(Ok(HandleResponse {
+            messages: vec![],
+            log: vec![
+                log(
+                    "Error",
+                    "Unable to register action with the factory contract",
+                ),
+                log("Reason", "Missing active auction list"),
+            ],
+            data: None,
+        }));
     }
+    Ok((active, info, error))
 }
 
 /// Returns HandleResult
@@ -781,7 +762,7 @@ fn try_create_key<S: Storage, A: Api, Q: Querier>(
     save(&mut key_store, message_sender.as_slice(), &key.to_hashed())?;
 
     // clean up the bidder's list of active auctions
-    let load_active: Option<HashSet<Vec<u8>>> = may_load(&deps.storage, ACTIVE_KEY)?;
+    let load_active: Option<HashSet<u32>> = may_load(&deps.storage, ACTIVE_KEY)?;
     if let Some(mut active) = load_active {
         let mut bidder_store = PrefixedStorage::new(PREFIX_BIDDERS, &mut deps.storage);
         let (my_active, update) = filter_only_active(&bidder_store, message_sender, &mut active)?;
@@ -821,7 +802,7 @@ fn try_set_key<S: Storage, A: Api, Q: Querier>(
     save(&mut key_store, message_sender.as_slice(), &vk.to_hashed())?;
 
     // clean up the bidder's list of active auctions
-    let load_active: Option<HashSet<Vec<u8>>> = may_load(&deps.storage, ACTIVE_KEY)?;
+    let load_active: Option<HashSet<u32>> = may_load(&deps.storage, ACTIVE_KEY)?;
     if let Some(mut active) = load_active {
         let mut bidder_store = PrefixedStorage::new(PREFIX_BIDDERS, &mut deps.storage);
         let (my_active, update) = filter_only_active(&bidder_store, message_sender, &mut active)?;
@@ -849,17 +830,17 @@ fn try_set_key<S: Storage, A: Api, Q: Querier>(
 /// * `storage` - mutable reference to contract's storage
 /// * `prefix` - prefix to storage of either seller's or bidder's closed auction lists
 /// * `person` - a reference to the canonical address of the person the list belongs to
-/// * `auction` - a reference to the canonical address of the auction to be added to list
+/// * `index` - index of the auction to add
 fn add_to_persons_closed<S: Storage>(
     storage: &mut S,
     prefix: &[u8],
     person: &CanonicalAddr,
-    auction: &CanonicalAddr,
+    index: u32,
 ) -> StdResult<()> {
     let mut store = PrefixedStorage::new(prefix, storage);
-    let load_closed: Option<Vec<Vec<u8>>> = may_load(&store, person.as_slice())?;
+    let load_closed: Option<Vec<u32>> = may_load(&store, person.as_slice())?;
     let mut closed = load_closed.unwrap_or_default();
-    closed.push(auction.as_slice().to_vec());
+    closed.push(index);
     save(&mut store, person.as_slice(), &closed)?;
     Ok(())
 }
@@ -873,23 +854,23 @@ fn add_to_persons_closed<S: Storage>(
 /// * `storage` - mutable reference to contract's storage
 /// * `prefix` - prefix to storage of either seller's or bidder's active auction lists
 /// * `person` - a reference to the canonical address of the person the list belongs to
-/// * `auction` - a reference to the canonical address of the auction to be removed
+/// * `index` - index of the auction to remove
 fn remove_from_persons_active<S: Storage>(
     storage: &mut S,
     prefix: &[u8],
     person: &CanonicalAddr,
-    auction: &CanonicalAddr,
+    index: u32,
 ) -> StdResult<()> {
     let mut store = PrefixedStorage::new(prefix, storage);
-    let load_active: Option<HashSet<Vec<u8>>> = may_load(&store, person.as_slice())?;
+    let load_active: Option<HashSet<u32>> = may_load(&store, person.as_slice())?;
     if let Some(mut active) = load_active {
-        active.remove(&auction.as_slice().to_vec());
+        active.remove(&index);
         save(&mut store, person.as_slice(), &active)?;
     }
     Ok(())
 }
 
-/// Returns StdResult<(HashSet<Vec<u8>>, bool)> which is the address' updated active list
+/// Returns StdResult<(HashSet<u32>, bool)> which is the address' updated active list
 /// and a bool that is true if the list has been changed from what was in storage
 ///
 /// remove any closed auctions from the list
@@ -902,17 +883,16 @@ fn remove_from_persons_active<S: Storage>(
 fn filter_only_active<S: ReadonlyStorage>(
     storage: &S,
     address: &CanonicalAddr,
-    active: &mut HashSet<Vec<u8>>,
-) -> StdResult<(HashSet<Vec<u8>>, bool)> {
+    active: &mut HashSet<u32>,
+) -> StdResult<(HashSet<u32>, bool)> {
     // get person's current list
-    let load_auctions: Option<HashSet<Vec<u8>>> = may_load(storage, address.as_slice())?;
+    let load_auctions: Option<HashSet<u32>> = may_load(storage, address.as_slice())?;
 
     // if there are active auctions in the list
     if let Some(my_auctions) = load_auctions {
         let start_len = my_auctions.len();
         // only keep the intersection of the person's list and the active auctions list
-        let my_active: HashSet<Vec<u8>> =
-            my_auctions.iter().filter_map(|v| active.take(v)).collect();
+        let my_active: HashSet<u32> = my_auctions.iter().filter_map(|v| active.take(v)).collect();
         let updated = start_len != my_active.len();
         return Ok((my_active, updated));
         // if not just return an empty list
@@ -961,24 +941,6 @@ fn try_validate_key<S: Storage, A: Api, Q: Querier>(
     let addr_raw = &deps.api.canonical_address(address)?;
     to_binary(&QueryAnswer::IsKeyValid {
         is_valid: is_key_valid(&deps.storage, addr_raw, viewing_key)?,
-    })
-}
-
-/// Returns QueryResult listing the closed auctions
-///
-/// # Arguments
-///
-/// * `deps` - reference to Extern containing all the contract's external dependencies
-/// * `before` - optional u64 timestamp in seconds since epoch time to only list auctions
-///              that closed earlier
-/// * `page_size` - optional number of auctions to display
-fn try_list_closed<S: Storage, A: Api, Q: Querier>(
-    deps: &Extern<S, A, Q>,
-    before: Option<u64>,
-    page_size: Option<u32>,
-) -> QueryResult {
-    to_binary(&QueryAnswer::ListClosedAuctions {
-        closed: display_closed(&deps.api, &deps.storage, before, page_size)?,
     })
 }
 
@@ -1114,13 +1076,13 @@ fn display_active_list<S: ReadonlyStorage, A: Api>(
     prefix: Option<&[u8]>,
     key: &[u8],
 ) -> StdResult<Option<Vec<AuctionInfo>>> {
-    let load_list: Option<HashSet<Vec<u8>>> = if let Some(pref) = prefix {
+    let load_list: Option<HashSet<u32>> = if let Some(pref) = prefix {
         // reading a person's list
         let read = &ReadonlyPrefixedStorage::new(pref, storage);
         // if reading a bidder's list
         if pref == PREFIX_BIDDERS {
             // read the factory's active list
-            let load_active: Option<HashSet<Vec<u8>>> = may_load(storage, ACTIVE_KEY)?;
+            let load_active: Option<HashSet<u32>> = may_load(storage, ACTIVE_KEY)?;
             if let Some(mut active) = load_active {
                 let canonical = CanonicalAddr(Binary(key.to_vec()));
                 // remove any auctions that closed from the list
@@ -1144,9 +1106,10 @@ fn display_active_list<S: ReadonlyStorage, A: Api>(
             let read_info = &ReadonlyPrefixedStorage::new(PREFIX_ACTIVE_INFO, storage);
             // get the token symbol strings
             let symdecs: Vec<TokenSymDec> = load(storage, SYMDEC_KEY)?;
-            for addr in list.iter() {
+            for index in list.iter() {
                 // get this auction's info
-                let load_info: Option<StoreAuctionInfo> = may_load(read_info, addr.as_slice())?;
+                let load_info: Option<StoreAuctionInfo> =
+                    may_load(read_info, &index.to_le_bytes())?;
                 if let Some(info) = load_info {
                     let may_sell_symdec = symdecs.get(info.sell_symbol as usize);
                     if let Some(sell_symdec) = may_sell_symdec {
@@ -1154,8 +1117,7 @@ fn display_active_list<S: ReadonlyStorage, A: Api>(
                         if let Some(bid_symdec) = may_bid_symdec {
                             let pair = format!("{}-{}", sell_symdec.symbol, bid_symdec.symbol);
                             display_list.push(AuctionInfo {
-                                address: api
-                                    .human_address(&CanonicalAddr::from(addr.as_slice()))?,
+                                address: api.human_address(&info.address)?,
                                 label: info.label,
                                 pair,
                                 sell_amount: Uint128(info.sell_amount),
@@ -1197,107 +1159,34 @@ fn display_addr_closed<S: ReadonlyStorage, A: Api>(
     key: &[u8],
 ) -> StdResult<Option<Vec<ClosedAuctionInfo>>> {
     let read_closed = &ReadonlyPrefixedStorage::new(prefix, storage);
-    let load_list: Option<Vec<Vec<u8>>> = may_load(read_closed, key)?;
+    let load_list: Option<Vec<u32>> = may_load(read_closed, key)?;
     let closed = match load_list {
         Some(list) => {
             let mut display_list = Vec::new();
-            let read_info = &ReadonlyPrefixedStorage::new(PREFIX_CLOSED_INFO, storage);
-            // get token symbol strings
-            let symdecs: Vec<TokenSymDec> = load(storage, SYMDEC_KEY)?;
-            // in reverse chronological order
-            for addr in list.iter().rev() {
-                // get this auction's info
-                let load_info: Option<StoreClosedAuctionInfo> =
-                    may_load(read_info, addr.as_slice())?;
-                if let Some(info) = load_info {
-                    let may_sell_symdec = symdecs.get(info.sell_symbol as usize);
-                    if let Some(sell_symdec) = may_sell_symdec {
-                        let may_bid_symdec = symdecs.get(info.bid_symbol as usize);
-                        if let Some(bid_symdec) = may_bid_symdec {
-                            let pair = format!("{}-{}", sell_symdec.symbol, bid_symdec.symbol);
-                            let bid_decimals = if info.winning_bid.is_some() {
-                                Some(bid_symdec.decimals)
-                            } else {
-                                None
-                            };
-                            display_list.push(ClosedAuctionInfo {
-                                address: api
-                                    .human_address(&CanonicalAddr::from(addr.as_slice()))?,
-                                label: info.label,
-                                pair,
-                                sell_amount: Uint128(info.sell_amount),
-                                sell_decimals: sell_symdec.decimals,
-                                winning_bid: info.winning_bid.map(Uint128),
-                                bid_decimals,
-                                timestamp: info.timestamp,
-                            });
-                        }
-                    }
-                }
-            }
-            display_list
-        }
-        None => Vec::new(),
-    };
-    if closed.is_empty() {
-        return Ok(None);
-    }
-    Ok(Some(closed))
-}
-
-/// Returns StdResult<Option<Vec<ClosedAuctionInfo>>>
-///
-/// provide the factory's list of closed auctions
-///
-/// # Arguments
-///
-/// * `api` - reference to the Api used to convert canonical and human addresses
-/// * `storage` - a reference to the contract's storage
-/// * `start` - optional u64 timestamp in seconds since epoch time to only list auctions
-///              that closed earlier
-/// * `page_size` - optional number of auctions to display
-fn display_closed<S: ReadonlyStorage, A: Api>(
-    api: &A,
-    storage: &S,
-    start: Option<u64>,
-    page_size: Option<u32>,
-) -> StdResult<Option<Vec<ClosedAuctionInfo>>> {
-    let load_list: Option<BTreeMap<u64, Vec<u8>>> = may_load(storage, CLOSED_KEY)?;
-    let closed = match load_list {
-        Some(mut list) => {
-            let mut display_list = Vec::new();
-            let read_info = &ReadonlyPrefixedStorage::new(PREFIX_CLOSED_INFO, storage);
-            // get the token symbol strings
-            let symdecs: Vec<TokenSymDec> = load(storage, SYMDEC_KEY)?;
-            // get the timestamp of the latest close
-            if let Some(max) = list.keys().next_back() {
-                // start iterating from the last close or before given start point
-                let begin = start.unwrap_or(max + 1);
-                let quant = page_size.unwrap_or(200) as usize;
-                // grab backwards from the starting point
-                for (_k, addr) in list.range_mut(..begin).rev().take(quant) {
-                    let load_info: Option<StoreClosedAuctionInfo> =
-                        may_load(read_info, addr.as_slice())?;
+            let read_store = &ReadonlyPrefixedStorage::new(PREFIX_CLOSED_INFO, storage);
+            let may_read_store = AppendStore::<StoreClosedAuctionInfo, _>::attach(read_store);
+            if let Some(closed_store) = may_read_store.and_then(|r| r.ok()) {
+                // get token symbol strings
+                let symdecs: Vec<TokenSymDec> = load(storage, SYMDEC_KEY)?;
+                // in reverse chronological order
+                for &index in list.iter().rev() {
+                    // get this auction's info
+                    let load_info = closed_store.get_at(index).ok();
                     if let Some(info) = load_info {
                         let may_sell_symdec = symdecs.get(info.sell_symbol as usize);
                         if let Some(sell_symdec) = may_sell_symdec {
                             let may_bid_symdec = symdecs.get(info.bid_symbol as usize);
                             if let Some(bid_symdec) = may_bid_symdec {
                                 let pair = format!("{}-{}", sell_symdec.symbol, bid_symdec.symbol);
-                                let bid_decimals = if info.winning_bid.is_some() {
-                                    Some(bid_symdec.decimals)
-                                } else {
-                                    None
-                                };
                                 display_list.push(ClosedAuctionInfo {
-                                    address: api
-                                        .human_address(&CanonicalAddr::from(addr.as_slice()))?,
+                                    index: None,
+                                    address: api.human_address(&info.address)?,
                                     label: info.label,
                                     pair,
                                     sell_amount: Uint128(info.sell_amount),
                                     sell_decimals: sell_symdec.decimals,
                                     winning_bid: info.winning_bid.map(Uint128),
-                                    bid_decimals,
+                                    bid_decimals: info.winning_bid.map(|_a| bid_symdec.decimals),
                                     timestamp: info.timestamp,
                                 });
                             }
@@ -1313,4 +1202,61 @@ fn display_closed<S: ReadonlyStorage, A: Api>(
         return Ok(None);
     }
     Ok(Some(closed))
+}
+
+/// Returns QueryResult listing the closed auctions
+///
+/// # Arguments
+///
+/// * `deps` - reference to Extern containing all the contract's external dependencies
+/// * `before` - optional u32 index of the earliest auction you do not want to display
+/// * `page_size` - optional number of auctions to display
+fn try_list_closed<S: Storage, A: Api, Q: Querier>(
+    deps: &Extern<S, A, Q>,
+    before: Option<u32>,
+    page_size: Option<u32>,
+) -> QueryResult {
+    let read_store = &ReadonlyPrefixedStorage::new(PREFIX_CLOSED_INFO, &deps.storage);
+    let may_read_store = AppendStore::<StoreClosedAuctionInfo, _>::attach(read_store);
+    let mut closed_vec = Vec::new();
+    if let Some(closed_store) = may_read_store.and_then(|r| r.ok()) {
+        // get the token symbol strings
+        let symdecs: Vec<TokenSymDec> = load(&deps.storage, SYMDEC_KEY)?;
+        // start iterating from the last close or before given index
+        let len = closed_store.len();
+        let mut pos = before.unwrap_or(len);
+        if pos > len {
+            pos = len;
+        }
+        let skip = (len - pos) as usize;
+        let quant = page_size.unwrap_or(200) as usize;
+        // grab backwards from the starting point
+        for (i, res) in closed_store.iter().enumerate().rev().skip(skip).take(quant) {
+            let info = res?;
+            let may_sell_symdec = symdecs.get(info.sell_symbol as usize);
+            if let Some(sell_symdec) = may_sell_symdec {
+                let may_bid_symdec = symdecs.get(info.bid_symbol as usize);
+                if let Some(bid_symdec) = may_bid_symdec {
+                    let pair = format!("{}-{}", sell_symdec.symbol, bid_symdec.symbol);
+                    closed_vec.push(ClosedAuctionInfo {
+                        index: Some(i as u32),
+                        address: deps.api.human_address(&info.address)?,
+                        label: info.label,
+                        pair,
+                        sell_amount: Uint128(info.sell_amount),
+                        sell_decimals: sell_symdec.decimals,
+                        winning_bid: info.winning_bid.map(Uint128),
+                        bid_decimals: info.winning_bid.map(|_a| bid_symdec.decimals),
+                        timestamp: info.timestamp,
+                    });
+                }
+            }
+        }
+    }
+    let closed = if closed_vec.is_empty() {
+        None
+    } else {
+        Some(closed_vec)
+    };
+    to_binary(&QueryAnswer::ListClosedAuctions { closed })
 }

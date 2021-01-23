@@ -53,7 +53,7 @@
       }
     },
     {
-      "description": "lists closed auctions in reverse chronological order.  If you specify page size, it return only that number of auctions (default is 200).  If you specify the before timestamp, it will start listing from the first auction that closed before the timestamp (in number of seconds since epoch 01/01/1970).  If you are paginating, you would take the timestamp of the last auction you receive, and specify that as the before timestamp on your next query so it will continue where it left off",
+      "description": "lists closed auctions in reverse chronological order.  If you specify page size, it returns only that number of auctions (default is 200).  If you specify the before parameter, it will start listing from the first auction whose index is less than \"before\".  If you are paginating, you would take the index of the last auction you receive, and specify that as the before parameter on your next query so it will continue where it left off",
       "type": "object",
       "required": [
         "list_closed_auctions"
@@ -63,13 +63,13 @@
           "type": "object",
           "properties": {
             "before": {
-              "description": "optionally only show auctions that closed before this timestamp (number of seconds from epoch 01/01/1970)",
+              "description": "optionally only show auctions with index less than specified value",
               "default": null,
               "type": [
                 "integer",
                 "null"
               ],
-              "format": "uint64",
+              "format": "uint32",
               "minimum": 0.0
             },
             "page_size": {
