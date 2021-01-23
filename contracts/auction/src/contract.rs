@@ -458,19 +458,18 @@ fn try_bid<S: Storage, A: Api, Q: Querier>(
     if state.bidders.contains(&bidder_raw.as_slice().to_vec()) {
         let bid: Option<Bid> = may_load(&deps.storage, bidder_raw.as_slice())?;
         if let Some(old_bid) = bid {
-            // if new bid is <= the old bid, keep old bid and return this one
-            if amount.u128() <= old_bid.amount {
+            // if new bid is == the old bid, keep old bid and return this one
+            if amount.u128() == old_bid.amount {
                 let message = String::from(
-                    "New bid less than or equal to previous bid. Newly bid tokens have been \
-                     returned",
+                    "New bid is the same as previous bid.  Retaining previous timestamp",
                 );
 
                 let resp = serde_json::to_string(&HandleAnswer::Bid {
                     status: Failure,
                     message,
-                    previous_bid: Some(Uint128(old_bid.amount)),
+                    previous_bid: Some(amount),
                     minimum_bid: None,
-                    amount_bid: None,
+                    amount_bid: Some(amount),
                     amount_returned: Some(amount),
                     bid_decimals: state.bid_decimals,
                 })
@@ -481,7 +480,7 @@ fn try_bid<S: Storage, A: Api, Q: Querier>(
                     log: vec![log("response", resp)],
                     data: None,
                 });
-            // new bid is larger, save the new bid, and return the old one, so mark for return
+            // new bid is different, save the new bid, and return the old one, so mark for return
             } else {
                 return_amount = Some(Uint128(old_bid.amount));
             }
@@ -1365,6 +1364,23 @@ mod tests {
         .unwrap();
         assert_eq!(bid.amount, 100);
 
+        // test bid equal to  previous bid
+        let handle_msg = HandleMsg::Receive {
+            sender: HumanAddr("blah".to_string()),
+            from: HumanAddr("bob".to_string()),
+            amount: Uint128(100),
+            msg: None,
+        };
+        let handle_result = handle(&mut deps, mock_env("bidaddr", &[]), handle_msg);
+        let log = extract_log(handle_result);
+        assert!(log.contains("New bid is the same as previous bid.  Retaining previous timestamp"));
+        assert!(log.contains("\"previous_bid\":\"100\""));
+        assert!(log.contains("\"amount_bid\":\"100\""));
+        assert!(log.contains("\"amount_returned\":\"100\""));
+        assert!(log.contains("\"bid_decimals\":8"));
+        let state: State = load(&deps.storage, CONFIG_KEY).unwrap();
+        assert_eq!(state.bidders.len(), 1);
+
         // test bid less than previous bid
         let handle_msg = HandleMsg::Receive {
             sender: HumanAddr("blah".to_string()),
@@ -1374,9 +1390,9 @@ mod tests {
         };
         let handle_result = handle(&mut deps, mock_env("bidaddr", &[]), handle_msg);
         let log = extract_log(handle_result);
-        assert!(log.contains("New bid less than or equal to previous bid"));
-        assert!(log.contains("\"previous_bid\":\"100\""));
-        assert!(log.contains("\"amount_returned\":\"25\""));
+        assert!(log.contains("Previously bid tokens have been returned"));
+        assert!(log.contains("\"amount_bid\":\"25\""));
+        assert!(log.contains("\"amount_returned\":\"100\""));
         assert!(log.contains("\"bid_decimals\":8"));
         let state: State = load(&deps.storage, CONFIG_KEY).unwrap();
         assert_eq!(state.bidders.len(), 1);
@@ -1392,7 +1408,7 @@ mod tests {
         let log = extract_log(handle_result);
         assert!(log.contains("Previously bid tokens have been returned"));
         assert!(log.contains("\"amount_bid\":\"250\""));
-        assert!(log.contains("\"amount_returned\":\"100\""));
+        assert!(log.contains("\"amount_returned\":\"25\""));
         assert!(log.contains("\"bid_decimals\":8"));
         let state: State = load(&deps.storage, CONFIG_KEY).unwrap();
         assert_eq!(state.bidders.len(), 1);
