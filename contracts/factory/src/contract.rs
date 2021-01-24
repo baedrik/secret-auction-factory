@@ -452,12 +452,12 @@ fn try_close_auction<S: Storage, A: Api, Q: Querier>(
     let seller_raw = &deps.api.canonical_address(seller)?;
     remove_from_persons_active(&mut deps.storage, PREFIX_SELLERS_ACTIVE, seller_raw, index)?;
     // add to seller's closed list
-    add_to_persons_closed(
+    let mut sell_store = PrefixedStorage::multilevel(
+        &[PREFIX_SELLERS_CLOSED, seller_raw.as_slice()],
         &mut deps.storage,
-        PREFIX_SELLERS_CLOSED,
-        seller_raw,
-        closed_index,
-    )?;
+    );
+    let mut seller_closed = AppendStoreMut::attach_or_create(&mut sell_store)?;
+    seller_closed.push(&closed_index)?;
 
     // if auction had a winner
     if let Some(winner) = bidder {
@@ -466,8 +466,13 @@ fn try_close_auction<S: Storage, A: Api, Q: Querier>(
         let mut bidder_store = PrefixedStorage::new(PREFIX_BIDDERS, &mut deps.storage);
         let (win_active, _) = filter_only_active(&bidder_store, winner_raw, &mut active)?;
         save(&mut bidder_store, winner_raw.as_slice(), &win_active)?;
-        // add to winner's closed list
-        add_to_persons_closed(&mut deps.storage, PREFIX_WINNERS, winner_raw, closed_index)?;
+        // add to winner's closed
+        let mut win_store = PrefixedStorage::multilevel(
+            &[PREFIX_WINNERS, winner_raw.as_slice()],
+            &mut deps.storage,
+        );
+        let mut winner_list = AppendStoreMut::attach_or_create(&mut win_store)?;
+        winner_list.push(&closed_index)?;
     }
 
     Ok(HandleResponse {
@@ -825,30 +830,6 @@ fn try_set_key<S: Storage, A: Api, Q: Querier>(
 
 /// Returns StdResult<()>
 ///
-/// add an auction to a seller's or bidder's list of closed auctions
-///
-/// # Arguments
-///
-/// * `storage` - mutable reference to contract's storage
-/// * `prefix` - prefix to storage of either seller's or bidder's closed auction lists
-/// * `person` - a reference to the canonical address of the person the list belongs to
-/// * `index` - index of the auction to add
-fn add_to_persons_closed<S: Storage>(
-    storage: &mut S,
-    prefix: &[u8],
-    person: &CanonicalAddr,
-    index: u32,
-) -> StdResult<()> {
-    let mut store = PrefixedStorage::new(prefix, storage);
-    let load_closed: Option<Vec<u32>> = may_load(&store, person.as_slice())?;
-    let mut closed = load_closed.unwrap_or_default();
-    closed.push(index);
-    save(&mut store, person.as_slice(), &closed)?;
-    Ok(())
-}
-
-/// Returns StdResult<()>
-///
 /// remove an auction from a seller's or bidder's list of active auctions
 ///
 /// # Arguments
@@ -1160,27 +1141,27 @@ fn display_addr_closed<S: ReadonlyStorage, A: Api>(
     prefix: &[u8],
     key: &[u8],
 ) -> StdResult<Option<Vec<ClosedAuctionInfo>>> {
-    let read_closed = &ReadonlyPrefixedStorage::new(prefix, storage);
-    let load_list: Option<Vec<u32>> = may_load(read_closed, key)?;
-    let closed = match load_list {
-        Some(list) => {
-            let mut display_list = Vec::new();
-            let read_store = &ReadonlyPrefixedStorage::new(PREFIX_CLOSED_INFO, storage);
-            let may_read_store = AppendStore::<StoreClosedAuctionInfo, _>::attach(read_store);
-            if let Some(closed_store) = may_read_store.and_then(|r| r.ok()) {
-                // get token symbol strings
-                let symdecs: Vec<TokenSymDec> = load(storage, SYMDEC_KEY)?;
-                // in reverse chronological order
-                for &index in list.iter().rev() {
+    let list_store = ReadonlyPrefixedStorage::multilevel(&[prefix, key], storage);
+    let may_read_list = AppendStore::<u32, _>::attach(&list_store);
+    let mut closed_vec = Vec::new();
+    if let Some(closed_list) = may_read_list.and_then(|r| r.ok()) {
+        let info_store = ReadonlyPrefixedStorage::new(PREFIX_CLOSED_INFO, storage);
+        let may_read_info = AppendStore::<StoreClosedAuctionInfo, _>::attach(&info_store);
+        if let Some(closed_info) = may_read_info.and_then(|r| r.ok()) {
+            // get the token symbol strings
+            let symdecs: Vec<TokenSymDec> = load(storage, SYMDEC_KEY)?;
+            // grab backwards from the starting point
+            for index_res in closed_list.iter().rev() {
+                if let Ok(index) = index_res {
                     // get this auction's info
-                    let load_info = closed_store.get_at(index).ok();
-                    if let Some(info) = load_info {
+                    let load_info = closed_info.get_at(index);
+                    if let Ok(info) = load_info {
                         let may_sell_symdec = symdecs.get(info.sell_symbol as usize);
                         if let Some(sell_symdec) = may_sell_symdec {
                             let may_bid_symdec = symdecs.get(info.bid_symbol as usize);
                             if let Some(bid_symdec) = may_bid_symdec {
                                 let pair = format!("{}-{}", sell_symdec.symbol, bid_symdec.symbol);
-                                display_list.push(ClosedAuctionInfo {
+                                closed_vec.push(ClosedAuctionInfo {
                                     index: None,
                                     address: api.human_address(&info.address)?,
                                     label: info.label,
@@ -1196,14 +1177,12 @@ fn display_addr_closed<S: ReadonlyStorage, A: Api>(
                     }
                 }
             }
-            display_list
         }
-        None => Vec::new(),
-    };
-    if closed.is_empty() {
+    }
+    if closed_vec.is_empty() {
         return Ok(None);
     }
-    Ok(Some(closed))
+    Ok(Some(closed_vec))
 }
 
 /// Returns QueryResult listing the closed auctions
@@ -1218,8 +1197,8 @@ fn try_list_closed<S: Storage, A: Api, Q: Querier>(
     before: Option<u32>,
     page_size: Option<u32>,
 ) -> QueryResult {
-    let read_store = &ReadonlyPrefixedStorage::new(PREFIX_CLOSED_INFO, &deps.storage);
-    let may_read_store = AppendStore::<StoreClosedAuctionInfo, _>::attach(read_store);
+    let read_store = ReadonlyPrefixedStorage::new(PREFIX_CLOSED_INFO, &deps.storage);
+    let may_read_store = AppendStore::<StoreClosedAuctionInfo, _>::attach(&read_store);
     let mut closed_vec = Vec::new();
     if let Some(closed_store) = may_read_store.and_then(|r| r.ok()) {
         // get the token symbol strings
@@ -1234,23 +1213,24 @@ fn try_list_closed<S: Storage, A: Api, Q: Querier>(
         let quant = page_size.unwrap_or(200) as usize;
         // grab backwards from the starting point
         for (i, res) in closed_store.iter().enumerate().rev().skip(skip).take(quant) {
-            let info = res?;
-            let may_sell_symdec = symdecs.get(info.sell_symbol as usize);
-            if let Some(sell_symdec) = may_sell_symdec {
-                let may_bid_symdec = symdecs.get(info.bid_symbol as usize);
-                if let Some(bid_symdec) = may_bid_symdec {
-                    let pair = format!("{}-{}", sell_symdec.symbol, bid_symdec.symbol);
-                    closed_vec.push(ClosedAuctionInfo {
-                        index: Some(i as u32),
-                        address: deps.api.human_address(&info.address)?,
-                        label: info.label,
-                        pair,
-                        sell_amount: Uint128(info.sell_amount),
-                        sell_decimals: sell_symdec.decimals,
-                        winning_bid: info.winning_bid.map(Uint128),
-                        bid_decimals: info.winning_bid.map(|_a| bid_symdec.decimals),
-                        timestamp: info.timestamp,
-                    });
+            if let Ok(info) = res {
+                let may_sell_symdec = symdecs.get(info.sell_symbol as usize);
+                if let Some(sell_symdec) = may_sell_symdec {
+                    let may_bid_symdec = symdecs.get(info.bid_symbol as usize);
+                    if let Some(bid_symdec) = may_bid_symdec {
+                        let pair = format!("{}-{}", sell_symdec.symbol, bid_symdec.symbol);
+                        closed_vec.push(ClosedAuctionInfo {
+                            index: Some(i as u32),
+                            address: deps.api.human_address(&info.address)?,
+                            label: info.label,
+                            pair,
+                            sell_amount: Uint128(info.sell_amount),
+                            sell_decimals: sell_symdec.decimals,
+                            winning_bid: info.winning_bid.map(Uint128),
+                            bid_decimals: info.winning_bid.map(|_a| bid_symdec.decimals),
+                            timestamp: info.timestamp,
+                        });
+                    }
                 }
             }
         }
