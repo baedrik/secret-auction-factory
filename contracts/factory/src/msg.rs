@@ -256,15 +256,6 @@ pub struct ContractInfo {
     pub address: HumanAddr,
 }
 
-/// symbol and number of decimal places of a token
-#[derive(Serialize, Deserialize, JsonSchema)]
-pub struct TokenSymDec {
-    /// token symbol
-    pub symbol: String,
-    /// number of decimal places for the token
-    pub decimals: u8,
-}
-
 /// Info needed to instantiate an auction
 #[derive(Serialize, Deserialize, JsonSchema)]
 pub struct AuctionContractInfo {

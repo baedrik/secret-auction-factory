@@ -1,10 +1,37 @@
 use std::any::type_name;
+use std::collections::HashMap;
 
-use serde::{de::DeserializeOwned, Serialize};
+use serde::{de::DeserializeOwned, Deserialize, Serialize};
 
-use cosmwasm_std::{ReadonlyStorage, StdError, StdResult, Storage};
+use cosmwasm_std::{CanonicalAddr, ReadonlyStorage, StdError, StdResult, Storage};
 
 use secret_toolkit::serialization::{Bincode2, Serde};
+
+use crate::msg::AuctionContractInfo;
+
+/// symbol and number of decimal places of a token
+#[derive(Serialize, Deserialize)]
+pub struct TokenSymDec {
+    /// token symbol
+    pub symbol: String,
+    /// number of decimal places for the token
+    pub decimals: u8,
+}
+
+/// grouping the data primarily used when creating a new auction
+#[derive(Serialize, Deserialize)]
+pub struct Config {
+    /// code hash and address of the auction contract
+    pub version: AuctionContractInfo,
+    /// map token contract address to symdec list index
+    pub symdecmap: HashMap<Vec<u8>, u16>,
+    /// unique id to give created auction
+    pub index: u32,
+    /// factory's create auction status
+    pub stopped: bool,
+    /// address of the factory admin
+    pub admin: CanonicalAddr,
+}
 
 /// Returns StdResult<()> resulting from saving an item to storage
 ///

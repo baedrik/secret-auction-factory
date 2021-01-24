@@ -19,10 +19,10 @@ use secret_toolkit::{
 use crate::msg::{
     AuctionContractInfo, AuctionInfo, ClosedAuctionInfo, ContractInfo, FilterTypes, HandleAnswer,
     HandleMsg, InitMsg, MyActiveLists, MyClosedLists, QueryAnswer, QueryMsg, RegisterAuctionInfo,
-    ResponseStatus::Success, StoreAuctionInfo, StoreClosedAuctionInfo, TokenSymDec,
+    ResponseStatus::Success, StoreAuctionInfo, StoreClosedAuctionInfo,
 };
 use crate::rand::sha_256;
-use crate::state::{load, may_load, remove, save};
+use crate::state::{load, may_load, remove, save, Config, TokenSymDec};
 use crate::viewing_key::{ViewingKey, VIEWING_KEY_SIZE};
 
 /// prefix for storage of sellers' closed auctions
@@ -41,22 +41,14 @@ pub const PREFIX_CLOSED_INFO: &[u8] = b"closedinfo";
 pub const PREFIX_VIEW_KEY: &[u8] = b"viewingkey";
 /// storage key for prng seed
 pub const PRNG_SEED_KEY: &[u8] = b"prngseed";
-/// storage key for the factory admin
-pub const ADMIN_KEY: &[u8] = b"admin";
-/// storage key for the factory status
-pub const STATUS_KEY: &[u8] = b"status";
-/// storage key for the auction contract info
-pub const VERSION_KEY: &[u8] = b"version";
+/// storage key for the factory config
+pub const CONFIG_KEY: &[u8] = b"config";
 /// storage key for the active auction list
 pub const ACTIVE_KEY: &[u8] = b"active";
 /// storage key for token symbols and decimals
 pub const SYMDEC_KEY: &[u8] = b"symdec";
-/// storage key for token symbols/decimals map
-pub const SYMDEC_MAP_KEY: &[u8] = b"symdecmap";
 /// storage key for the label of the auction we just instantiated
 pub const PENDING_KEY: &[u8] = b"pending";
-/// storage key for the index to give the newest auction
-pub const INDEX_KEY: &[u8] = b"index";
 /// pad handle responses and log attributes to blocks of 256 bytes to prevent leaking info based on
 /// response size
 pub const BLOCK_SIZE: usize = 256;
@@ -77,21 +69,21 @@ pub fn init<S: Storage, A: Api, Q: Querier>(
     msg: InitMsg,
 ) -> InitResult {
     let prng_seed: Vec<u8> = sha_256(base64::encode(msg.entropy).as_bytes()).to_vec();
-    let version: AuctionContractInfo = msg.auction_contract;
     let active: HashSet<u32> = HashSet::new();
     let symdec: Vec<TokenSymDec> = Vec::new();
-    let symdecmap: HashMap<Vec<u8>, u16> = HashMap::new();
-    let index: u32 = 0;
-    let stopped = false;
 
-    save(&mut deps.storage, VERSION_KEY, &version)?;
-    save(&mut deps.storage, ADMIN_KEY, &env.message.sender)?;
-    save(&mut deps.storage, STATUS_KEY, &stopped)?;
+    let config = Config {
+        version: msg.auction_contract,
+        symdecmap: HashMap::new(),
+        index: 0,
+        stopped: false,
+        admin: deps.api.canonical_address(&env.message.sender)?,
+    };
+
+    save(&mut deps.storage, CONFIG_KEY, &config)?;
     save(&mut deps.storage, PRNG_SEED_KEY, &prng_seed)?;
     save(&mut deps.storage, ACTIVE_KEY, &active)?;
     save(&mut deps.storage, SYMDEC_KEY, &symdec)?;
-    save(&mut deps.storage, SYMDEC_MAP_KEY, &symdecmap)?;
-    save(&mut deps.storage, INDEX_KEY, &index)?;
 
     Ok(InitResponse::default())
 }
@@ -225,8 +217,8 @@ fn try_create_auction<S: Storage, A: Api, Q: Querier>(
         const BLOCK_SIZE: usize = BLOCK_SIZE;
     }
 
-    let stop: bool = load(&deps.storage, STATUS_KEY)?;
-    if stop {
+    let mut config: Config = load(&deps.storage, CONFIG_KEY)?;
+    if config.stopped {
         return Err(StdError::generic_err(
             "The factory has been stopped.  No new auctions can be created",
         ));
@@ -236,7 +228,6 @@ fn try_create_auction<S: Storage, A: Api, Q: Querier>(
         code_hash: env.contract_code_hash,
         address: env.contract.address,
     };
-    let mut symmap: HashMap<Vec<u8>, u16> = load(&deps.storage, SYMDEC_MAP_KEY)?;
     // get sell token info
     let sell_token_info = token_info_query(
         &deps.querier,
@@ -246,7 +237,10 @@ fn try_create_auction<S: Storage, A: Api, Q: Querier>(
     )?;
     let sell_decimals = sell_token_info.decimals;
     let sell_addr_raw = &deps.api.canonical_address(&sell_contract.address)?;
-    let may_sell_index = symmap.get_mut(&sell_addr_raw.as_slice().to_vec()).copied();
+    let may_sell_index = config
+        .symdecmap
+        .get(&sell_addr_raw.as_slice().to_vec())
+        .copied();
     // get bid token info
     let bid_token_info = token_info_query(
         &deps.querier,
@@ -256,7 +250,10 @@ fn try_create_auction<S: Storage, A: Api, Q: Querier>(
     )?;
     let bid_decimals = bid_token_info.decimals;
     let bid_addr_raw = &deps.api.canonical_address(&bid_contract.address)?;
-    let may_bid_index = symmap.get_mut(&bid_addr_raw.as_slice().to_vec()).copied();
+    let may_bid_index = config
+        .symdecmap
+        .get(&bid_addr_raw.as_slice().to_vec())
+        .copied();
     let add_symbol = may_sell_index.is_none() || may_bid_index.is_none();
     let sell_index: u16;
     let bid_index: u16;
@@ -271,7 +268,9 @@ fn try_create_auction<S: Storage, A: Api, Q: Querier>(
                     decimals: sell_token_info.decimals,
                 };
                 sell_index = symdecs.len() as u16;
-                symmap.insert(sell_addr_raw.as_slice().to_vec(), sell_index);
+                config
+                    .symdecmap
+                    .insert(sell_addr_raw.as_slice().to_vec(), sell_index);
                 symdecs.push(symdec)
             }
         }
@@ -283,28 +282,25 @@ fn try_create_auction<S: Storage, A: Api, Q: Querier>(
                     decimals: bid_token_info.decimals,
                 };
                 bid_index = symdecs.len() as u16;
-                symmap.insert(bid_addr_raw.as_slice().to_vec(), bid_index);
+                config
+                    .symdecmap
+                    .insert(bid_addr_raw.as_slice().to_vec(), bid_index);
                 symdecs.push(symdec)
             }
         }
         save(&mut deps.storage, SYMDEC_KEY, &symdecs)?;
-        save(&mut deps.storage, SYMDEC_MAP_KEY, &symmap)?;
     // not a new symbol so just get its index from the map
     } else {
         sell_index = may_sell_index.unwrap();
         bid_index = may_bid_index.unwrap();
     }
 
-    // get the current version of the auction contract's hash and code id
-    let auction_info: AuctionContractInfo = load(&deps.storage, VERSION_KEY)?;
-    // get index for this auction and increment it
-    let mut index: u32 = load(&deps.storage, INDEX_KEY)?;
     // save label and only register an auction giving the matching label
     save(&mut deps.storage, PENDING_KEY, &label)?;
 
     let initmsg = AuctionInitMsg {
         factory,
-        index,
+        index: config.index,
         label: label.clone(),
         seller: env.message.sender,
         sell_contract,
@@ -318,12 +314,16 @@ fn try_create_auction<S: Storage, A: Api, Q: Querier>(
         ends_at,
         description,
     };
-    // increment and save the index for the next auction
-    index += 1;
-    save(&mut deps.storage, INDEX_KEY, &index)?;
+    // increment the index for the next auction
+    config.index += 1;
+    save(&mut deps.storage, CONFIG_KEY, &config)?;
 
-    let cosmosmsg =
-        initmsg.to_cosmos_msg(label, auction_info.code_id, auction_info.code_hash, None)?;
+    let cosmosmsg = initmsg.to_cosmos_msg(
+        label,
+        config.version.code_id,
+        config.version.code_hash,
+        None,
+    )?;
 
     Ok(HandleResponse {
         messages: vec![cosmosmsg],
@@ -687,14 +687,15 @@ fn try_new_contract<S: Storage, A: Api, Q: Querier>(
     auction_contract: AuctionContractInfo,
 ) -> HandleResult {
     // only allow admin to do this
-    let admin: HumanAddr = load(&deps.storage, ADMIN_KEY)?;
-    if env.message.sender != admin {
+    let mut config: Config = load(&deps.storage, CONFIG_KEY)?;
+    let sender = deps.api.canonical_address(&env.message.sender)?;
+    if config.admin != sender {
         return Err(StdError::generic_err(
             "This is an admin command. Admin commands can only be run from admin address",
         ));
     }
-    // save new auction contract info
-    save(&mut deps.storage, VERSION_KEY, &auction_contract)?;
+    config.version = auction_contract;
+    save(&mut deps.storage, CONFIG_KEY, &config)?;
 
     Ok(HandleResponse {
         messages: vec![],
@@ -721,14 +722,15 @@ fn try_set_status<S: Storage, A: Api, Q: Querier>(
     stop: bool,
 ) -> HandleResult {
     // only allow admin to do this
-    let admin: HumanAddr = load(&deps.storage, ADMIN_KEY)?;
-    if env.message.sender != admin {
+    let mut config: Config = load(&deps.storage, CONFIG_KEY)?;
+    let sender = deps.api.canonical_address(&env.message.sender)?;
+    if config.admin != sender {
         return Err(StdError::generic_err(
             "This is an admin command. Admin commands can only be run from admin address",
         ));
     }
-    // save status
-    save(&mut deps.storage, STATUS_KEY, &stop)?;
+    config.stopped = stop;
+    save(&mut deps.storage, CONFIG_KEY, &config)?;
 
     Ok(HandleResponse {
         messages: vec![],
