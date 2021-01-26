@@ -6,13 +6,13 @@ Although the original auction contract will no longer be updated, the repo will 
 ## Creating a New Auction
 First you must give the factory an allowance to consign the tokens for sale to the new auction's escrow:
 ```sh
-secretcli tx compute execute *sale_tokens_contract_address* '{"increase_allowance":{"spender":"secret1lqdx8va86f9cff5dsz28l97x20z67qv7d4npj8","amount":"*amount_being_sold_in_smallest_denomination_of_sale_token*"}}' --from *your_key_alias_or_addr* --gas 150000 -y
+secretcli tx compute execute *sale_tokens_contract_address* '{"increase_allowance":{"spender":"secret1lqdx8va86f9cff5dsz28l97x20z67qv7d4npj8","amount":"*amount_being_sold_in_smallest_denomination_of_sale_token*"}}' --from *your_key_alias_or_addr* --gas 120000 -y
 ```
 Granting allowance does not send any tokens, it only gives the factory permission to send tokens on your behalf. If for some reason after performing the above command you decide not to proceed with creating the auction, you may revoke that permission by using the `decrease_allowance` command. `decrease_allowance` follows the exact same input format as the above command.
 
 Then you can create the auction with:
 ```sh
-secretcli tx compute execute --label 811dot1 '{"create_auction":{"label":"*your_auction_name*","sell_contract":{"code_hash":"*sale_tokens_code_hash*","address":"*sale_tokens_contract_address*"},"bid_contract":{"code_hash":"*bid_tokens_code_hash*","address":"*bid_tokens_contract_address*"},"sell_amount":"*amount_being_sold_in_smallest_denomination_of_sale_token*","minimum_bid":"*minimum_accepted_bid_in_smallest_denomination_of_bid_token*","ends_at":*seconds_since_epoch_after_which_anyone_may_close_the_auction*,"description":"*optional_text_description*"}}' --from *your_key_alias_or_addr* --gas 600000 -y
+secretcli tx compute execute --label 811dot1 '{"create_auction":{"label":"*your_auction_name*","sell_contract":{"code_hash":"*sale_tokens_code_hash*","address":"*sale_tokens_contract_address*"},"bid_contract":{"code_hash":"*bid_tokens_code_hash*","address":"*bid_tokens_contract_address*"},"sell_amount":"*amount_being_sold_in_smallest_denomination_of_sale_token*","minimum_bid":"*minimum_accepted_bid_in_smallest_denomination_of_bid_token*","ends_at":*seconds_since_epoch_after_which_anyone_may_close_the_auction*,"description":"*optional_text_description*"}}' --from *your_key_alias_or_addr* --gas 630000 -y
 ```
 You can find a contract's code hash with
 ```sh
